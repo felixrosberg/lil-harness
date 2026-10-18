@@ -1,0 +1,32 @@
+# Permission rules for the coding tools. Copy to permissions.toml and edit.
+# Use with: uv run python examples/step5_coding.py --rules permissions.toml
+#
+# Keep this file outside the folder the model works in, or it is protected
+# automatically: the model can read it but not change it.
+
+# "default": reads run, writes and commands ask you first.
+# "readonly": reads run, writes and commands aren't offered at all.
+# "auto": everything runs without asking. Only inside a throwaway sandbox.
+preset = "default"
+
+# Optional: override one risk level of the preset. Each is "allow", "ask" or "deny".
+[modes]
+# write = "allow"
+
+[commands]
+# Run without asking, but only on an exact match (extra spaces don't count).
+# "git status" here does not allow "git status && del *.*".
+allow = [
+    "git status",
+    "git diff",
+    "python test_stats.py",
+]
+
+# Always refused, even in "auto". Regular expressions, matched anywhere in the command.
+# A safety net, not a guarantee: there are endless ways to write a harmful command.
+deny = [
+    'rm\s+-rf',
+    '\bdel\b',
+    '\brmdir\b',
+    'git\s+push',
+]

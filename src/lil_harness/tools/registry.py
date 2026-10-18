@@ -15,7 +15,17 @@ from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ValidationError, create_model
 
+from lil_harness.permissions import PermissionPolicy, Risk
 from lil_harness.types import ToolCall, ToolResult
+
+
+class ToolError(Exception):
+    """Raise this from a tool to send the model a plain, actionable error message.
+
+    Other exceptions are reported too, but with their type name, which reads like a
+    crash. A ToolError reads like advice: "old_text appears 3 times; include more
+    context".
+    """
 
 
 @dataclass
@@ -26,6 +36,8 @@ class ToolSpec:
     description: str
     fn: Callable[..., Any]
     args_model: type[BaseModel]
+    # How much care a call needs; see permissions.py. Unlabelled tools get the most.
+    risk: Risk = "execute"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -51,23 +63,38 @@ def _args_model_from_signature(fn: Callable[..., Any]) -> type[BaseModel]:
 
 
 class ToolRegistry:
-    """Holds the tools available to the model and runs them."""
+    """Holds the tools available to the model and runs them.
 
-    def __init__(self) -> None:
+    With a `policy`, every call is checked before it runs (see permissions.py).
+    Without one, every call runs, which is what the examples and evals want.
+    """
+
+    def __init__(self, policy: PermissionPolicy | None = None) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self.policy = policy
 
-    def tool(self, fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
+    def tool(
+        self,
+        fn: Callable[..., Any] | None = None,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        risk: Risk = "execute",
+    ) -> Any:
         """Decorator: register a function as a tool. Its docstring becomes the description.
 
-        Usable as `@registry.tool` or `@registry.tool(name="other_name")`.
+        Usable as `@registry.tool` or `@registry.tool(name="other_name")`. Pass
+        `description` to override the docstring, for text that is only known at runtime,
+        and `risk` to say what the tool can do: "read", "write" or "execute".
         """
 
         def register(tool_function: Callable[..., Any]) -> Callable[..., Any]:
             spec = ToolSpec(
                 name=name or tool_function.__name__,
-                description=inspect.cleandoc(tool_function.__doc__ or ""),
+                description=description or inspect.cleandoc(tool_function.__doc__ or ""),
                 fn=tool_function,
                 args_model=_args_model_from_signature(tool_function),
+                risk=risk,
             )
             if spec.name in self._tools:
                 raise ValueError(f"Tool {spec.name!r} is already registered")
@@ -77,7 +104,10 @@ class ToolRegistry:
         return register(fn) if fn is not None else register
 
     def specs(self) -> list[ToolSpec]:
-        return list(self._tools.values())
+        """The tools to offer the model. Tools the policy denies outright are left out."""
+        return [
+            s for s in self._tools.values() if self.policy is None or self.policy.offers(s.risk)
+        ]
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Run one tool call. Never raises: every failure becomes an error result.
@@ -106,10 +136,17 @@ class ToolRegistry:
             )
             return self._error(call, f"Invalid arguments for {call.name!r}: {problems}")
 
+        if self.policy is not None:
+            decision = await self.policy.check(spec.name, spec.risk, args.model_dump())
+            if not decision.allowed:
+                return self._error(call, f"Permission denied. {decision.message}")
+
         try:
             output = spec.fn(**args.model_dump())
             if inspect.isawaitable(output):
                 output = await output
+        except ToolError as e:
+            return self._error(call, str(e))
         except Exception as e:  # noqa: BLE001 - any tool failure is reported to the model
             return self._error(call, f"Tool {call.name!r} failed: {type(e).__name__}: {e}")
 

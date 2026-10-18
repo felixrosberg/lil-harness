@@ -30,7 +30,7 @@ def default_registry(names: list[str] | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for fn in ALL_TOOLS:
         if names is None or fn.__name__ in names:
-            registry.tool(fn)
+            registry.tool(fn, risk="read")
     if names is not None:
         unknown = set(names) - {fn.__name__ for fn in ALL_TOOLS}
         if unknown:
