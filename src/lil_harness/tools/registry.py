@@ -206,7 +206,9 @@ class ToolRegistry:
             level the policy denies outright.
         """
         return [
-            s for s in self._tools.values() if self.policy is None or self.policy.offers(s.risk)
+            spec
+            for spec in self._tools.values()
+            if self.policy is None or self.policy.offers(spec.risk)
         ]
 
     async def execute(self, call: ToolCall) -> ToolResult:

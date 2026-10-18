@@ -44,7 +44,7 @@ class Case(BaseModel):
     """One eval case, as written in a YAML file.
 
     Attributes:
-        id: A unique name, shown in the report.
+        name: A unique name, shown in the report.
         prompt: The user message the model gets.
         tools: Which built-in tools to offer. None offers all of them.
         tags: Labels for grouping scores; the file name is added automatically.
@@ -70,7 +70,7 @@ def load_cases(directory: Path) -> list[Case]:
         All cases, each tagged with its file's name.
 
     Raises:
-        ValueError: If a file isn't a list, or two cases share an id.
+        ValueError: If a file isn't a list, or two cases share a name.
         pydantic.ValidationError: If a case has a typo or a wrong type.
     """
     cases: list[Case] = []
@@ -86,7 +86,7 @@ def load_cases(directory: Path) -> list[Case]:
             cases.append(case)
 
     case_names = [case.name for case in cases]
-    duplicates = sorted({i for i in case_names if case_names.count(i) > 1})
+    duplicates = sorted({name for name in case_names if case_names.count(name) > 1})
     if duplicates:
-        raise ValueError(f"Duplicate case ids: {', '.join(duplicates)}")
+        raise ValueError(f"Duplicate case names: {', '.join(duplicates)}")
     return cases

@@ -84,7 +84,7 @@ def main(
 
     click.echo(f"Running {len(cases)} cases x {repeats} on {engine} ...")
     records = asyncio.run(run_suite(cases, backend, repeats=repeats, concurrency=concurrency))
-    if all(r.error for r in records):
+    if all(record.error for record in records):
         raise click.ClickException(
             f"Every run failed, so the server is probably not reachable: {records[0].error}"
         )
@@ -111,7 +111,7 @@ def print_report(records: list[RunRecord], label: str, verbose: bool) -> None:
     """
     summary = summarize(records)
     click.echo(f"\n{label}\n")
-    width = max(len(k) for k in summary.by_case)
+    width = max(len(case_name) for case_name in summary.by_case)
     for case_id, count in summary.by_case.items():
         ok = count.all_passed
         mark = click.style("PASS", fg="green") if ok else click.style("FAIL", fg="red")
@@ -142,8 +142,11 @@ def print_report(records: list[RunRecord], label: str, verbose: bool) -> None:
             f"\n  {'tool selection:':<20} {'precision':>9}  {'recall':>6}  {'f1':>5}  tp/fp/fn"
         )
         for name, tool_score in summary.tool_scores.items():
+            precision, recall, f1 = (
+                pct(tool_score.precision), pct(tool_score.recall), pct(tool_score.f1)
+            )  # fmt: skip
             click.echo(
-                f"    {name:<18} {pct(tool_score.precision):>9}  {pct(tool_score.recall):>6}  {pct(tool_score.f1):>5}"
+                f"    {name:<18} {precision:>9}  {recall:>6}  {f1:>5}"
                 f"  {tool_score.tp}/{tool_score.fp}/{tool_score.fn}"
             )
     error_rate = f"{summary.tool_errors}/{summary.tool_calls}" if summary.tool_calls else "0/0"
@@ -153,7 +156,8 @@ def print_report(records: list[RunRecord], label: str, verbose: bool) -> None:
         + (f"   crashed {summary.crashed}" if summary.crashed else "")
     )
     if any(count.runs > 1 for count in summary.by_case.values()):
-        click.echo(f"  reliable {summary.reliable_cases}/{len(summary.by_case)} cases passed every repeat")
+        reliable = f"{summary.reliable_cases}/{len(summary.by_case)}"
+        click.echo(f"  reliable {reliable} cases passed every repeat")
 
 
 def pct(value: float | None) -> str:

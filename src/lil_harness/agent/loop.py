@@ -63,7 +63,9 @@ async def run_agent(
             return RunResult(turn.content, history, step, "final_answer")
 
         # Independent tool calls in one turn run concurrently; results keep call order.
-        results = await asyncio.gather(*(registry.execute(c) for c in turn.tool_calls))
-        history.extend(Message.tool(r) for r in results)
+        results = await asyncio.gather(
+            *(registry.execute(tool_call) for tool_call in turn.tool_calls)
+        )
+        history.extend(Message.tool(result) for result in results)
 
     return RunResult(None, history, max_steps, "max_steps")

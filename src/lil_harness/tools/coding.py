@@ -85,7 +85,7 @@ class CodingTools:
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ValueError(f"Workspace {self.root} is not a folder")
-        self.protected = {Path(p).resolve() for p in protected}
+        self.protected = {Path(path).resolve() for path in protected}
         self.max_output_chars = max_output_chars
         self.read_limit = read_limit
 
@@ -104,10 +104,10 @@ class CodingTools:
             registered but not offered to the model.
         """
         registry = ToolRegistry(policy or PermissionPolicy.preset("default"))
-        for fn in (self.list_files, self.grep, self.read_file):
-            registry.tool(fn, risk="read")
-        for fn in (self.write_file, self.edit_file):
-            registry.tool(fn, risk="write")
+        for tool in (self.list_files, self.grep, self.read_file):
+            registry.tool(tool, risk="read")
+        for tool in (self.write_file, self.edit_file):
+            registry.tool(tool, risk="write")
         registry.tool(
             self.run_command,
             risk="execute",
@@ -172,8 +172,8 @@ class CodingTools:
             raise ToolError(f"{path!r} doesn't exist. Use list_files to find the right path.")
         try:
             # newline="" keeps Windows \r\n line endings as they are, so edits keep them.
-            with target.open(encoding="utf-8", newline="") as f:
-                return target, f.read()
+            with target.open(encoding="utf-8", newline="") as file:
+                return target, file.read()
         except UnicodeDecodeError:
             raise ToolError(f"{path!r} is not a UTF-8 text file.") from None
 
@@ -194,11 +194,11 @@ class CodingTools:
         if not base.is_dir():
             raise ToolError(f"{path!r} is not a folder.")
         return sorted(
-            p
-            for p in base.glob(pattern)
-            if p.is_file()
-            and not IGNORED_DIRS.intersection(p.relative_to(self.root).parts)
-            and p.resolve().is_relative_to(self.root)
+            file
+            for file in base.glob(pattern)
+            if file.is_file()
+            and not IGNORED_DIRS.intersection(file.relative_to(self.root).parts)
+            and file.resolve().is_relative_to(self.root)
         )
 
     # ---- the tools -------------------------------------------------------------
@@ -219,7 +219,7 @@ class CodingTools:
         files = self._files(path, pattern)
         if not files:
             return f"No files match {pattern!r} in {path!r}."
-        lines = [self._rel(p) for p in files[:limit]]
+        lines = [self._rel(file) for file in files[:limit]]
         if len(files) > limit:
             lines.append(f"[... {len(files) - limit} more. Use a narrower pattern ...]")
         return "\n".join(lines)
@@ -309,8 +309,8 @@ class CodingTools:
             raise ToolError(f"{path!r} is a folder.")
         target.parent.mkdir(parents=True, exist_ok=True)
         existed = target.exists()
-        with target.open("w", encoding="utf-8", newline="") as f:
-            f.write(content)
+        with target.open("w", encoding="utf-8", newline="") as file:
+            file.write(content)
         lines = len(content.splitlines())
         return f"{'Replaced' if existed else 'Created'} {self._rel(target)} ({lines} lines)."
 
@@ -352,8 +352,8 @@ class CodingTools:
                 f"old_text appears {count} times in {path!r}. Include more surrounding lines "
                 "so it is unique, or set replace_all to true."
             )
-        with target.open("w", encoding="utf-8", newline="") as f:
-            f.write(text.replace(old_text, new_text))
+        with target.open("w", encoding="utf-8", newline="") as file:
+            file.write(text.replace(old_text, new_text))
 
         # Show the edited region, so the model can check the result without a re-read.
         before = text[: text.index(old_text)]

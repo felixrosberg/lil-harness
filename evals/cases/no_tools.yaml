@@ -1,18 +1,18 @@
 # Questions the model should answer without any tool. Small models often call a tool
 # anyway, which costs time and can make the answer worse.
 
-- id: capital_of_france
+- name: capital_of_france
   prompt: What is the capital of France?
   expect:
     no_tool_calls: true
     answer_contains: [paris]
 
-- id: haiku
+- name: haiku
   prompt: Write a haiku about autumn leaves.
   expect:
     no_tool_calls: true
 
-- id: explain_concept
+- name: explain_concept
   prompt: In one sentence, what is a prime number?
   expect:
     no_tool_calls: true

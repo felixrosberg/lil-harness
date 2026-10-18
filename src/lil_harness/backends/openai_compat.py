@@ -72,7 +72,7 @@ class OpenAICompatBackend:
         Raises:
             RuntimeError: If LIL_BASE_URL or LIL_MODEL isn't set.
         """
-        missing = [v for v in ("LIL_BASE_URL", "LIL_MODEL") if not os.environ.get(v)]
+        missing = [var for var in ("LIL_BASE_URL", "LIL_MODEL") if not os.environ.get(var)]
         if missing:
             raise RuntimeError(f"Set these environment variables first: {', '.join(missing)}")
         return cls(
@@ -99,12 +99,12 @@ class OpenAICompatBackend:
         """
         request: OpenAIRequest = {
             "model": self.model,
-            "messages": [message_to_openai(m) for m in messages],
+            "messages": [message_to_openai(message) for message in messages],
             "temperature": self.temperature,
         }
         # Some servers reject an empty tools list, so only send it when there are tools.
         if tools:
-            request["tools"] = [tool_to_openai(t) for t in tools]
+            request["tools"] = [tool_to_openai(tool) for tool in tools]
         if self.max_tokens is not None:
             request["max_tokens"] = self.max_tokens
         if self.extra_body:
@@ -114,7 +114,7 @@ class OpenAICompatBackend:
         choice = response.choices[0]
         return AssistantTurn(
             content=choice.message.content,
-            tool_calls=[tool_call_from_openai(c) for c in choice.message.tool_calls or []],
+            tool_calls=[tool_call_from_openai(call) for call in choice.message.tool_calls or []],
             finish_reason=choice.finish_reason,
             reasoning=reasoning_from_openai(choice.message),
         )
@@ -160,33 +160,37 @@ def tool_to_openai(spec: ToolSpec) -> OpenAITool:
     }
 
 
-def message_to_openai(m: Message) -> OpenAIMessage:
+def message_to_openai(message: Message) -> OpenAIMessage:
     """Convert one of our messages to OpenAI's format.
 
     Args:
-        m: A message from the history.
+        message: A message from the history.
 
     Returns:
         The request dict for that message. Reasoning is left out on purpose: models
         are trained to see their past answers, not their past thinking.
     """
-    if m.role == "tool":
-        return {"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content or ""}
+    if message.role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": message.tool_call_id,
+            "content": message.content or "",
+        }
 
-    out: OpenAIMessage = {"role": m.role, "content": m.content}
-    if m.tool_calls:
+    out: OpenAIMessage = {"role": message.role, "content": message.content}
+    if message.tool_calls:
         out["tool_calls"] = [
             {
-                "id": c.id,
+                "id": tool_call.id,
                 "type": "function",
                 "function": {
-                    "name": c.name,
+                    "name": tool_call.name,
                     # Send back exactly what the model produced, so its own history
                     # isn't silently "fixed" for it.
-                    "arguments": c.raw_arguments or json.dumps(c.arguments),
+                    "arguments": tool_call.raw_arguments or json.dumps(tool_call.arguments),
                 },
             }
-            for c in m.tool_calls
+            for tool_call in message.tool_calls
         ]
     return out
 

@@ -123,7 +123,7 @@ async def run(
     click.echo(f"workspace: {tools.root}")
     modes = ", ".join(f"{risk} {mode}" for risk, mode in policy.modes.items())
     click.echo(f"permissions: {modes}")
-    click.echo(f"tools: {', '.join(s.name for s in registry.specs())}\n")
+    click.echo(f"tools: {', '.join(spec.name for spec in registry.specs())}\n")
     try:
         result = await run_agent(
             backend,
@@ -136,18 +136,18 @@ async def run(
             f"Can't reach {backend.client.base_url}. Is the {engine} server running?"
         ) from None
 
-    for m in result.messages[2:]:
-        if m.reasoning:
-            click.secho(f"[thinking] {m.reasoning.strip()}", dim=True)
-        for c in m.tool_calls:
-            click.secho(f"[call] {c.name}({c.raw_arguments})", fg="cyan")
-        if m.role == "tool":
+    for message in result.messages[2:]:
+        if message.reasoning:
+            click.secho(f"[thinking] {message.reasoning.strip()}", dim=True)
+        for tool_call in message.tool_calls:
+            click.secho(f"[call] {tool_call.name}({tool_call.raw_arguments})", fg="cyan")
+        if message.role == "tool":
             # Tool results can be long; show the first few lines.
-            lines = (m.content or "").splitlines()
+            lines = (message.content or "").splitlines()
             shown = "\n       ".join(lines[:8]) + ("\n       ..." if len(lines) > 8 else "")
             click.secho(f"[tool] {shown}", dim=True)
-        elif m.content:
-            click.echo(f"[{m.role}] {m.content}")
+        elif message.content:
+            click.echo(f"[{message.role}] {message.content}")
     click.echo(f"\nstop_reason={result.stop_reason} steps={result.steps}")
     click.echo(f"The changed files are in {tools.root}")
 

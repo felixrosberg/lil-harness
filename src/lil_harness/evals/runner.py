@@ -144,7 +144,9 @@ async def run_case(case: Case, backend: ChatBackend, repeat: int, max_steps: int
     seconds = time.perf_counter() - start
 
     checks = grade(result, case.expect)
-    results_by_id = {m.tool_call_id: m for m in result.messages if m.role == "tool"}
+    results_by_id = {
+        message.tool_call_id: message for message in result.messages if message.role == "tool"
+    }
     tool_calls = [
         CallRecord(
             name=tool_call.name,
@@ -161,7 +163,7 @@ async def run_case(case: Case, backend: ChatBackend, repeat: int, max_steps: int
         case_id=case.name,
         repeat=repeat,
         tags=case.tags,
-        passed=all(c.passed for c in checks),
+        passed=all(check.passed for check in checks),
         checks=checks,
         answer=result.answer,
         tool_calls=tool_calls,

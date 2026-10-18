@@ -72,15 +72,15 @@ async def run(engine: str, question: str, model: str | None, think: bool) -> Non
         ) from None
     click.echo(f"{engine}: {backend.model} (thinking {'on' if think else 'off'})\n")
 
-    for m in result.messages[1:]:
-        if m.reasoning:
-            click.secho(f"[thinking] {m.reasoning.strip()}", dim=True)
-        if m.tool_calls:
-            for c in m.tool_calls:
+    for message in result.messages[1:]:
+        if message.reasoning:
+            click.secho(f"[thinking] {message.reasoning.strip()}", dim=True)
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
                 # raw_arguments is exactly what the model emitted.
-                click.echo(f"[{m.role}] calls {c.name}({c.raw_arguments})")
+                click.echo(f"[{message.role}] calls {tool_call.name}({tool_call.raw_arguments})")
         else:
-            click.echo(f"[{m.role}] {m.content}")
+            click.echo(f"[{message.role}] {message.content}")
     click.echo(f"\nstop_reason={result.stop_reason} steps={result.steps}")
 
 

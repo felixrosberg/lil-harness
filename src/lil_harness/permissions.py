@@ -131,7 +131,7 @@ class PermissionPolicy:
 
     def __post_init__(self) -> None:
         """Normalize the allowlist and set up the lock that keeps prompts one at a time."""
-        self.allow_commands = {normalize_command(c) for c in self.allow_commands}
+        self.allow_commands = {normalize_command(command) for command in self.allow_commands}
         # Tool calls run concurrently, but a human answers one question at a time.
         self._ask_lock = asyncio.Lock()
 
@@ -181,7 +181,9 @@ class PermissionPolicy:
                 raise ValueError(f"{path}: bad mode {risk} = {mode!r}")
             policy.modes[risk] = mode
         commands = data.get("commands", {})
-        policy.allow_commands |= {normalize_command(c) for c in commands.get("allow", [])}
+        policy.allow_commands |= {
+            normalize_command(command) for command in commands.get("allow", [])
+        }
         policy.deny_patterns += list(commands.get("deny", []))
         for pattern in policy.deny_patterns:
             re.compile(pattern)
@@ -279,7 +281,7 @@ def describe_call(tool: ToolName, args: ToolArgs, max_lines: int = 20) -> str:
         lines = [f"write {args.get('path')} ({len(content)} lines):"]
         lines += [f"  {line}" for line in content]
     else:
-        lines = [f"{tool}({', '.join(f'{k}={v!r}' for k, v in args.items())})"]
+        lines = [f"{tool}({', '.join(f'{name}={value!r}' for name, value in args.items())})"]
     if len(lines) > max_lines:
         lines = lines[:max_lines] + [f"  ... {len(lines) - max_lines} more lines"]
     return "\n".join(lines)

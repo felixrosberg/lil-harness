@@ -30,13 +30,13 @@ async def main() -> None:
         ],
     )
 
-    for m in result.messages[1:]:
-        if m.tool_calls:
-            for c in m.tool_calls:
+    for message in result.messages[1:]:
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
                 # raw_arguments is exactly what the model emitted.
-                print(f"[{m.role}] calls {c.name}({c.raw_arguments})")
+                print(f"[{message.role}] calls {tool_call.name}({tool_call.raw_arguments})")
         else:
-            print(f"[{m.role}] {m.content}")
+            print(f"[{message.role}] {message.content}")
     print(f"\nstop_reason={result.stop_reason} steps={result.steps}")
 
 

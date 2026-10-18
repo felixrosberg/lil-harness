@@ -53,12 +53,12 @@ async def main() -> None:
     )
     result = await run_agent(backend, registry, [Message.user("What is 17 * 25?")])
 
-    for m in result.messages:
-        if m.tool_calls:
-            for c in m.tool_calls:
-                print(f"[{m.role}] calls {c.name}({c.arguments})")
+    for message in result.messages:
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                print(f"[{message.role}] calls {tool_call.name}({tool_call.arguments})")
         else:
-            print(f"[{m.role}] {m.content}")
+            print(f"[{message.role}] {message.content}")
     print(f"\nstop_reason={result.stop_reason} steps={result.steps}")
 
 

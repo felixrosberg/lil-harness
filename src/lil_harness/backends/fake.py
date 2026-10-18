@@ -48,7 +48,7 @@ class FakeBackend:
             RuntimeError: If the model is called more times than the script has turns.
         """
         # Deep copy so later changes to the history don't rewrite what we recorded.
-        self.calls.append(FakeCall(copy.deepcopy(messages), [t.name for t in tools]))
+        self.calls.append(FakeCall(copy.deepcopy(messages), [tool.name for tool in tools]))
         if len(self.calls) > len(self.script):
             raise RuntimeError(f"FakeBackend script ran out after {len(self.script)} turns")
         return self.script[len(self.calls) - 1]

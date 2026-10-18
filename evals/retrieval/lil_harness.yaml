@@ -1,0 +1,52 @@
+# Questions about this repo, and where their answers are. Run with: uv run lil-rag-eval
+# A result is a hit when it comes from `source` and contains `contains` (any case).
+# Mix the wording: some questions use the code's own names (keyword search should
+# find them), some describe the idea in other words (semantic search should).
+
+- question: How many evaluation cases can run at the same time?
+  source: src/lil_harness/evals/runner.py
+  contains: Semaphore
+
+- question: What happens when the model asks for a tool that doesn't exist?
+  source: src/lil_harness/tools/registry.py
+  contains: Unknown tool
+
+- question: How does edit_file cope with Windows line endings?
+  source: src/lil_harness/tools/coding.py
+  contains: "\\r\\n"
+
+- question: Which commands run without asking for permission?
+  source: src/lil_harness/permissions.py
+  contains: allowlist
+
+- question: What does the readonly preset allow?
+  source: README.md
+  contains: readonly
+
+- question: When does the agent loop stop?
+  source: src/lil_harness/agent/loop.py
+  contains: max_steps
+
+- question: How do I turn off Qwen thinking mode in Ollama?
+  source: src/lil_harness/backends/ollama/backend.py
+  contains: reasoning_effort
+
+- question: Why does the model forget the task after reading a few files?
+  source: README.md
+  contains: OLLAMA_CONTEXT_LENGTH
+
+- question: How are tool argument descriptions taken from docstrings?
+  source: src/lil_harness/tools/registry.py
+  contains: def parse_docstring
+
+- question: How is long command output shortened?
+  source: src/lil_harness/tools/coding.py
+  contains: def clip
+
+- question: What is precision and recall per tool in the eval summary?
+  source: src/lil_harness/evals/runner.py
+  contains: precision
+
+- question: How are keyword and semantic search results combined?
+  source: src/lil_harness/rag/index.py
+  contains: RRF_K

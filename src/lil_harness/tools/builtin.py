@@ -52,11 +52,11 @@ def default_registry(names: list[str] | None = None) -> ToolRegistry:
         ValueError: If a name isn't one of the built-in tools.
     """
     registry = ToolRegistry()
-    for fn in ALL_TOOLS:
-        if names is None or fn.__name__ in names:
-            registry.tool(fn, risk="read")
+    for tool in ALL_TOOLS:
+        if names is None or tool.__name__ in names:
+            registry.tool(tool, risk="read")
     if names is not None:
-        unknown = set(names) - {fn.__name__ for fn in ALL_TOOLS}
+        unknown = set(names) - {tool.__name__ for tool in ALL_TOOLS}
         if unknown:
             raise ValueError(f"Unknown tools: {', '.join(sorted(unknown))}")
     return registry
