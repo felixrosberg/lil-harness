@@ -28,13 +28,32 @@ registry = default_registry()
 @click.option("--model", help="Model name. Defaults to qwen3:4b for Ollama; vLLM asks the server.")
 @click.option("--think", is_flag=True, help="Turn on Qwen3's thinking mode.")
 def main(engine: str, question: tuple[str, ...], model: str | None, think: bool) -> None:
-    """Ask a question to a local model that can use a calculator and a clock."""
+    """Ask a question to a local model that can use a calculator and a clock.
+
+    \f
+    Args:
+        engine: "ollama" or "vllm".
+        question: The question, as separate words from the command line.
+        model: The model name, or None for the engine's default.
+        think: Turn on thinking mode.
+    """
     text = " ".join(question) or "What is 1234 * 5678, and what time is it in UTC?"
     # click is synchronous, so this is where we enter async code.
     asyncio.run(run(engine, text, model, think))
 
 
 async def run(engine: str, question: str, model: str | None, think: bool) -> None:
+    """Run the agent once and print every message, with thinking dimmed.
+
+    Args:
+        engine: "ollama" or "vllm".
+        question: The user's question.
+        model: The model name, or None for the engine's default.
+        think: Turn on thinking mode.
+
+    Raises:
+        click.ClickException: If the server can't be reached.
+    """
     # The only engine-specific line: everything below is the same for both.
     backend_cls = OllamaBackend if engine == "ollama" else VLLMBackend
     backend = backend_cls(enable_thinking=think, **({"model": model} if model else {}))

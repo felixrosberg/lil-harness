@@ -3,6 +3,10 @@
     tools = CodingTools("path/to/project")
     registry = tools.registry(PermissionPolicy.preset("default", approver=...))
 
+The tools are methods, so they can share the workspace settings. Their docstrings
+are what the model reads: the summary becomes the tool's description and each `Args:`
+entry that argument's description (see registry.py). `Returns:` is for you.
+
 Two rules shape every tool here:
 
 - **Stay in the workspace.** Every path is resolved against the workspace folder, and
@@ -37,6 +41,15 @@ def clip(text: str, max_chars: int, hint: str = "") -> str:
 
     The end of command output is usually the important part (the error, the test
     summary), so both ends survive and the middle goes.
+
+    Args:
+        text: The text to shorten.
+        max_chars: Roughly how long the result may be (the cut notice adds a little).
+        hint: Added to the cut notice, to tell the model how to get the rest.
+
+    Returns:
+        `text` unchanged if it fits, otherwise its first third and the rest from its
+        end, with a notice of how much was cut in between.
     """
     if len(text) <= max_chars:
         return text
@@ -47,6 +60,8 @@ def clip(text: str, max_chars: int, hint: str = "") -> str:
 
 
 class CodingTools:
+    """The coding tools, bound to one workspace folder."""
+
     def __init__(
         self,
         root: str | Path,
@@ -55,11 +70,21 @@ class CodingTools:
         read_limit: int = 200,
         protected: list[str | Path] = (),
     ) -> None:
+        """Set up the tools for one folder.
+
+        Args:
+            root: The workspace folder. Every path the model gives is relative to it.
+            max_output_chars: The most characters any one tool result may have.
+            read_limit: How many lines read_file returns when the model doesn't say.
+            protected: Files the model may read but never change, like the permission
+                policy file itself: otherwise it could edit its own rules.
+
+        Raises:
+            ValueError: If `root` isn't an existing folder.
+        """
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ValueError(f"Workspace {self.root} is not a folder")
-        # Files the model may read but never change, like the permission policy file
-        # itself: otherwise it could edit its own rules.
         self.protected = {Path(p).resolve() for p in protected}
         self.max_output_chars = max_output_chars
         self.read_limit = read_limit
@@ -70,6 +95,13 @@ class CodingTools:
         Without a policy you get the "default" preset with nobody to ask, so the model
         can look around but every write and command is refused. Pass a policy with an
         approver to let a human decide, or the "auto" preset inside a sandbox.
+
+        Args:
+            policy: Decides which calls run, ask, or are refused.
+
+        Returns:
+            A new registry with all six tools. Tools the policy denies outright are
+            registered but not offered to the model.
         """
         registry = ToolRegistry(policy or PermissionPolicy.preset("default"))
         for fn in (self.list_files, self.grep, self.read_file):
@@ -87,6 +119,17 @@ class CodingTools:
     # ---- helpers -------------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
+        """Turn a path from the model into an absolute path inside the workspace.
+
+        Args:
+            path: A path relative to the workspace.
+
+        Returns:
+            The resolved absolute path (symlinks followed).
+
+        Raises:
+            ToolError: If the path ends up outside the workspace.
+        """
         target = (self.root / path).resolve()
         if not target.is_relative_to(self.root):
             raise ToolError(
@@ -96,15 +139,32 @@ class CodingTools:
         return target
 
     def _writable(self, path: str) -> Path:
+        """Like `_resolve`, but also refuses protected files.
+
+        Raises:
+            ToolError: If the path is outside the workspace or protected.
+        """
         target = self._resolve(path)
         if target in self.protected:
             raise ToolError(f"{path!r} is protected and can't be changed.")
         return target
 
     def _rel(self, path: Path) -> str:
+        """Returns: `path` relative to the workspace, with forward slashes."""
         return path.relative_to(self.root).as_posix() or "."
 
     def _read_text(self, path: str) -> tuple[Path, str]:
+        """Read a whole text file, keeping its line endings.
+
+        Args:
+            path: A path relative to the workspace.
+
+        Returns:
+            The resolved path and the file's text.
+
+        Raises:
+            ToolError: If it's a folder, missing, or not UTF-8 text.
+        """
         target = self._resolve(path)
         if target.is_dir():
             raise ToolError(f"{path!r} is a folder. Use list_files to see what's in it.")
@@ -118,6 +178,18 @@ class CodingTools:
             raise ToolError(f"{path!r} is not a UTF-8 text file.") from None
 
     def _files(self, path: str, pattern: str) -> list[Path]:
+        """Find files under `path` matching a glob, skipping IGNORED_DIRS.
+
+        Args:
+            path: A folder relative to the workspace.
+            pattern: A glob like "**/*.py", relative to that folder.
+
+        Returns:
+            The matching files, sorted, all inside the workspace.
+
+        Raises:
+            ToolError: If `path` isn't a folder in the workspace.
+        """
         base = self._resolve(path)
         if not base.is_dir():
             raise ToolError(f"{path!r} is not a folder.")
@@ -132,9 +204,16 @@ class CodingTools:
     # ---- the tools -------------------------------------------------------------
 
     def list_files(self, pattern: str = "**/*", path: str = ".") -> str:
-        """List files in the workspace that match a glob pattern, like '**/*.py' or 'src/*'.
+        """List files in the workspace that match a glob pattern.
 
         Folders such as .git, .venv and node_modules are skipped.
+
+        Args:
+            pattern: A glob pattern, like '**/*.py' or 'src/*'. '**' means any depth.
+            path: The folder to search in, relative to the workspace.
+
+        Returns:
+            One path per line, at most 200, or a message that nothing matched.
         """
         limit = 200
         files = self._files(path, pattern)
@@ -148,9 +227,17 @@ class CodingTools:
     def grep(
         self, pattern: str, path: str = ".", file_pattern: str = "**/*", ignore_case: bool = False
     ) -> str:
-        """Search file contents with a regular expression. Returns 'file:line: text' matches.
+        """Search file contents with a regular expression.
 
-        Narrow the search with path (a folder) or file_pattern (a glob like '**/*.py').
+        Args:
+            pattern: A Python regular expression, matched against each line.
+            path: The folder to search in, relative to the workspace.
+            file_pattern: Only search files matching this glob, like '**/*.py'.
+            ignore_case: Match upper and lower case alike.
+
+        Returns:
+            Matches as 'file:line: text', at most 100, or a message that none matched.
+            Binary and very large files are skipped.
         """
         try:
             regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
@@ -178,8 +265,14 @@ class CodingTools:
         """Read a text file. Lines come numbered like '  12| text'; the numbers and the '| '
         are not part of the file.
 
-        Long files are returned in pages: offset is the first line to read (starting at 1)
-        and limit how many lines.
+        Args:
+            path: The file, relative to the workspace.
+            offset: The first line to read, starting at 1.
+            limit: How many lines to read. Defaults to 200.
+
+        Returns:
+            The numbered lines. If the file has more, a last line says which offset to
+            use for the next page.
         """
         _, text = self._read_text(path)
         lines = text.splitlines()
@@ -203,6 +296,13 @@ class CodingTools:
         """Create a file, or replace a file's whole content. Creates missing folders.
 
         To change part of an existing file, use edit_file instead.
+
+        Args:
+            path: The file, relative to the workspace.
+            content: The complete new content of the file.
+
+        Returns:
+            Whether the file was created or replaced, and its line count.
         """
         target = self._writable(path)
         if target.is_dir():
@@ -217,9 +317,18 @@ class CodingTools:
     def edit_file(self, path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
         """Replace an exact piece of text in a file with new text.
 
-        old_text must match the file exactly, including indentation, and appear exactly
-        once, unless replace_all is true. Read the file first, and include a few
-        surrounding lines if the text you want to change is not unique.
+        Read the file first, and include a few surrounding lines if the text you want
+        to change is not unique.
+
+        Args:
+            path: The file, relative to the workspace.
+            old_text: The exact text to replace, including indentation. It must appear
+                exactly once, unless replace_all is true.
+            new_text: The text to put in its place.
+            replace_all: Replace every occurrence instead of requiring exactly one.
+
+        Returns:
+            How many places changed, and the lines around the first change, numbered.
         """
         self._writable(path)
         target, text = self._read_text(path)
@@ -256,7 +365,18 @@ class CodingTools:
         return f"Edited {self._rel(target)} in {times}. Around the first edit:\n{shown}"
 
     async def run_command(self, command: str, timeout_seconds: int = 60) -> str:
-        # Its description is set in registry(), because it names the shell.
+        """Run a shell command in the workspace folder.
+
+        The model sees a different summary, set in registry(), because it names the
+        shell. These Args are still its argument descriptions.
+
+        Args:
+            command: The command line to run.
+            timeout_seconds: Stop the command after this many seconds (at most 600).
+
+        Returns:
+            "exit code N" and the combined stdout and stderr, clipped at both ends.
+        """
         timeout_seconds = min(max(timeout_seconds, 1), 600)
         proc = await asyncio.create_subprocess_shell(
             command,

@@ -27,8 +27,8 @@ from lil_harness.evals.runner import RunRecord, run_suite, summarize
 @click.option("--think", is_flag=True, help="Turn on Qwen3's thinking mode.")
 @click.option("--repeats", default=1, show_default=True, help="Runs per case.")
 @click.option("--concurrency", default=4, show_default=True, help="Runs in flight at once.")
-@click.option("--tag", "tags", multiple=True, help="Only cases with this tag (repeatable).")
-@click.option("--case", "case_ids", multiple=True, help="Only this case id (repeatable).")
+@click.option("--tag", "case_tags", multiple=True, help="Only cases with this tag (repeatable).")
+@click.option("--case", "case_names", multiple=True, help="Only this case name (repeatable).")
 @click.option(
     "--cases-dir", type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=Path("evals/cases"), show_default=True,
@@ -44,18 +44,38 @@ def main(
     think: bool,
     repeats: int,
     concurrency: int,
-    tags: tuple[str, ...],
-    case_ids: tuple[str, ...],
+    case_tags: tuple[str, ...],
+    case_names: tuple[str, ...],
     cases_dir: Path,
     results_dir: Path,
     verbose: bool,
 ) -> None:
-    """Run the eval cases against a local Ollama or vLLM model."""
+    """Run the eval cases against a local Ollama or vLLM model.
+
+    \f
+    (click shows the text above as --help; everything after the \\f is for readers.)
+
+    Args:
+        engine: "ollama" or "vllm".
+        model: The model name, or None for the engine's default.
+        think: Turn on thinking mode.
+        repeats: Runs per case.
+        concurrency: Runs in flight at once.
+        case_tags: Keep only cases with one of these tags.
+        case_names: Keep only these cases.
+        cases_dir: Where the YAML case files are.
+        results_dir: Where to write the JSONL results.
+        verbose: Show every failed check, not just the first per run.
+
+    Raises:
+        click.ClickException: If no cases match, or every run failed (usually because
+            the server isn't running).
+    """
     cases = load_cases(cases_dir)
-    if tags:
-        cases = [c for c in cases if set(tags) & set(c.tags)]
-    if case_ids:
-        cases = [c for c in cases if c.id in case_ids]
+    if case_tags:
+        cases = [case for case in cases if set(case_tags) & set(case.tags)]
+    if case_names:
+        cases = [case for case in cases if case.name in case_names]
     if not cases:
         raise click.ClickException("No cases match those filters.")
 
@@ -75,58 +95,72 @@ def main(
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     slug = re.sub(r"[^A-Za-z0-9.]+", "-", label).strip("-")
     path = results_dir / f"{stamp}_{slug}.jsonl"
-    with path.open("w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r.to_dict()) + "\n")
+    with path.open("w", encoding="utf-8") as file:
+        for record in records:
+            file.write(json.dumps(record.to_dict()) + "\n")
     click.echo(f"\nFull results: {path}")
 
 
 def print_report(records: list[RunRecord], label: str, verbose: bool) -> None:
-    s = summarize(records)
+    """Print the per-case results, scores and summary.
+
+    Args:
+        records: The runs to report on.
+        label: A heading, e.g. "ollama qwen3:4b".
+        verbose: Show every failed check, not just the first per run.
+    """
+    summary = summarize(records)
     click.echo(f"\n{label}\n")
-    width = max(len(k) for k in s.by_case)
-    for case_id, (ok, n) in s.by_case.items():
-        mark = click.style("PASS", fg="green") if ok == n else click.style("FAIL", fg="red")
-        click.echo(f"  {mark}  {case_id:<{width}}  {ok}/{n}")
+    width = max(len(k) for k in summary.by_case)
+    for case_id, count in summary.by_case.items():
+        ok = count.all_passed
+        mark = click.style("PASS", fg="green") if ok else click.style("FAIL", fg="red")
+        click.echo(f"  {mark}  {case_id:<{width}}  {count.passed}/{count.runs}")
         # Show each distinct reason once, with how many runs failed that way.
         reasons: Counter[str] = Counter()
-        for r in records:
-            if r.case_id != case_id or r.passed:
+        for record in records:
+            if record.case_id != case_id or record.passed:
                 continue
-            if r.error:
-                reasons[f"crashed: {r.error}"] += 1
+            if record.error:
+                reasons[f"crashed: {record.error}"] += 1
                 continue
-            failed = [c for c in r.checks if not c.passed]
-            for c in failed if verbose else failed[:1]:
-                reasons[f"{c.name} ({c.detail})"] += 1
+            failed = [check for check in record.checks if not check.passed]
+            for failed_check in failed if verbose else failed[:1]:
+                reasons[f"{failed_check.name} ({failed_check.detail})"] += 1
         for reason, count in reasons.items():
             click.secho(f"          {count}x {reason}", dim=True)
 
     click.echo("\n  by tag:")
-    for tag, (ok, n) in s.by_tag.items():
-        click.echo(f"    {tag:<16} {ok}/{n}")
+    for tag, count in summary.by_tag.items():
+        click.echo(f"    {tag:<16} {count.passed}/{count.runs}")
 
-    if s.tool_scores:
+    if summary.tool_scores:
         # Precision: when it called the tool, was that right? Recall: when it should
         # have called the tool, did it? Counted per run, from cases that say which
         # tools they expect.
         click.echo(
             f"\n  {'tool selection:':<20} {'precision':>9}  {'recall':>6}  {'f1':>5}  tp/fp/fn"
         )
-        for name, t in s.tool_scores.items():
+        for name, tool_score in summary.tool_scores.items():
             click.echo(
-                f"    {name:<18} {pct(t.precision):>9}  {pct(t.recall):>6}  {pct(t.f1):>5}"
-                f"  {t.tp}/{t.fp}/{t.fn}"
+                f"    {name:<18} {pct(tool_score.precision):>9}  {pct(tool_score.recall):>6}  {pct(tool_score.f1):>5}"
+                f"  {tool_score.tp}/{tool_score.fp}/{tool_score.fn}"
             )
-    error_rate = f"{s.tool_errors}/{s.tool_calls}" if s.tool_calls else "0/0"
+    error_rate = f"{summary.tool_errors}/{summary.tool_calls}" if summary.tool_calls else "0/0"
     click.echo(
-        f"\n  passed {s.passed}/{s.runs}   tool errors {error_rate}   "
-        f"avg steps {s.avg_steps:.1f}   avg time {s.avg_seconds:.1f}s"
-        + (f"   crashed {s.crashed}" if s.crashed else "")
+        f"\n  passed {summary.passed}/{summary.runs}   tool errors {error_rate}   "
+        f"avg steps {summary.avg_steps:.1f}   avg time {summary.avg_seconds:.1f}s"
+        + (f"   crashed {summary.crashed}" if summary.crashed else "")
     )
-    if any(n > 1 for _, n in s.by_case.values()):
-        click.echo(f"  reliable {s.reliable_cases}/{len(s.by_case)} cases passed every repeat")
+    if any(count.runs > 1 for count in summary.by_case.values()):
+        click.echo(f"  reliable {summary.reliable_cases}/{len(summary.by_case)} cases passed every repeat")
 
 
 def pct(value: float | None) -> str:
+    """Format a fraction as a whole percentage, or "-" when there is no value."""
     return "-" if value is None else f"{value:.0%}"
+
+
+# Lets `python -m lil_harness.evals.cli` (and the debugger) run it without the lil-eval script.
+if __name__ == "__main__":
+    main()

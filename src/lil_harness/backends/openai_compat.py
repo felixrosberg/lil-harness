@@ -9,15 +9,25 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, TypeAlias
 
 from openai import AsyncOpenAI
 
 from lil_harness.tools.registry import ToolSpec
-from lil_harness.types import AssistantTurn, Message, ToolCall
+from lil_harness.types import AssistantTurn, Message, ToolArgs, ToolCall
+
+# The OpenAI wire format is plain JSON. These names say which piece of it a dict is.
+OpenAIRequest: TypeAlias = dict[str, Any]
+"""The body of POST /v1/chat/completions: model, messages, tools, temperature, ..."""
+OpenAIMessage: TypeAlias = dict[str, Any]
+"""One entry of the request's "messages", like {"role": "user", "content": "Hi"}."""
+OpenAITool: TypeAlias = dict[str, Any]
+"""One entry of the request's "tools": {"type": "function", "function": {...}}."""
 
 
 class OpenAICompatBackend:
+    """Talks to one model on one OpenAI-compatible server."""
+
     def __init__(
         self,
         model: str,
@@ -29,18 +39,39 @@ class OpenAICompatBackend:
         extra_body: dict[str, Any] | None = None,
         client: AsyncOpenAI | None = None,
     ) -> None:
+        """Set up the client. Nothing is sent until `complete` is called.
+
+        Args:
+            model: The model name as the server knows it, e.g. "qwen3:4b".
+            base_url: The server's API root, ending in /v1.
+            api_key: The key for hosted providers. Local servers ignore it.
+            temperature: Sampling temperature. 0 makes runs as repeatable as the
+                server allows, which is what you want for tool calls and evals.
+            max_tokens: Cap on the reply's length. None lets the server decide.
+            extra_body: Engine-specific request fields (vLLM's chat_template_kwargs,
+                Ollama's reasoning_effort, ...) that the SDK passes through untouched.
+            client: A ready-made client, so tests can plug in a fake transport.
+        """
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        # Engine-specific request fields (vLLM's guided decoding, OpenRouter's provider
-        # routing, ...) that the OpenAI SDK passes through untouched.
         self.extra_body = extra_body or {}
         # Local servers usually ignore the key, but the SDK requires one.
         self.client = client or AsyncOpenAI(base_url=base_url, api_key=api_key or "EMPTY")
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> OpenAICompatBackend:
-        """Build from LIL_BASE_URL, LIL_MODEL and LIL_API_KEY."""
+        """Build from the LIL_BASE_URL, LIL_MODEL and LIL_API_KEY environment variables.
+
+        Args:
+            **kwargs: Passed on to the constructor, e.g. temperature.
+
+        Returns:
+            A backend for that server and model.
+
+        Raises:
+            RuntimeError: If LIL_BASE_URL or LIL_MODEL isn't set.
+        """
         missing = [v for v in ("LIL_BASE_URL", "LIL_MODEL") if not os.environ.get(v)]
         if missing:
             raise RuntimeError(f"Set these environment variables first: {', '.join(missing)}")
@@ -52,7 +83,21 @@ class OpenAICompatBackend:
         )
 
     async def complete(self, messages: list[Message], tools: list[ToolSpec]) -> AssistantTurn:
-        request: dict[str, Any] = {
+        """Send one chat completion request and convert the reply.
+
+        Args:
+            messages: The conversation so far.
+            tools: The tools the model may call.
+
+        Returns:
+            The model's turn, with tool calls parsed by the server and our own checks
+            for broken arguments (see `tool_call_from_openai`).
+
+        Raises:
+            openai.APIConnectionError: If the server can't be reached.
+            openai.APIStatusError: If the server rejects the request.
+        """
+        request: OpenAIRequest = {
             "model": self.model,
             "messages": [message_to_openai(m) for m in messages],
             "temperature": self.temperature,
@@ -81,6 +126,12 @@ def reasoning_from_openai(message: Any) -> str | None:
     Servers that separate it from the answer put it in an extra field, and the name
     varies: vLLM uses `reasoning` (older versions `reasoning_content`), other servers
     may use `thinking`. The SDK keeps unknown fields in `model_extra`.
+
+    Args:
+        message: The SDK's message object from the response.
+
+    Returns:
+        The thinking text, or None if the server didn't send any.
     """
     extra = message.model_extra or {}
     for key in ("reasoning", "reasoning_content", "thinking"):
@@ -89,7 +140,16 @@ def reasoning_from_openai(message: Any) -> str | None:
     return None
 
 
-def tool_to_openai(spec: ToolSpec) -> dict[str, Any]:
+def tool_to_openai(spec: ToolSpec) -> OpenAITool:
+    """Describe one tool in OpenAI's format.
+
+    Args:
+        spec: The tool from the registry.
+
+    Returns:
+        A {"type": "function", "function": {...}} dict, which the server renders into
+        the prompt through the model's chat template.
+    """
     return {
         "type": "function",
         "function": {
@@ -100,11 +160,20 @@ def tool_to_openai(spec: ToolSpec) -> dict[str, Any]:
     }
 
 
-def message_to_openai(m: Message) -> dict[str, Any]:
+def message_to_openai(m: Message) -> OpenAIMessage:
+    """Convert one of our messages to OpenAI's format.
+
+    Args:
+        m: A message from the history.
+
+    Returns:
+        The request dict for that message. Reasoning is left out on purpose: models
+        are trained to see their past answers, not their past thinking.
+    """
     if m.role == "tool":
         return {"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content or ""}
 
-    out: dict[str, Any] = {"role": m.role, "content": m.content}
+    out: OpenAIMessage = {"role": m.role, "content": m.content}
     if m.tool_calls:
         out["tool_calls"] = [
             {
@@ -123,8 +192,17 @@ def message_to_openai(m: Message) -> dict[str, Any]:
 
 
 def tool_call_from_openai(call: Any) -> ToolCall:
+    """Convert one tool call from the response, keeping broken arguments visible.
+
+    Args:
+        call: The SDK's tool call object.
+
+    Returns:
+        A ToolCall. If the arguments aren't a JSON object, `arguments` is empty and
+        `arguments_error` says why, so the registry can tell the model.
+    """
     raw = call.function.arguments or ""
-    arguments: dict[str, Any] = {}
+    arguments: ToolArgs = {}
     error: str | None = None
     try:
         # Some models send "" for a tool with no parameters.

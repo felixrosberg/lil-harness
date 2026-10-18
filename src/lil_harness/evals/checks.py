@@ -11,24 +11,49 @@ from lil_harness.evals.cases import Expect
 
 @dataclass
 class Check:
+    """One pass/fail check on a run.
+
+    Attributes:
+        name: What was checked, e.g. "called calculate".
+        passed: Whether it passed.
+        detail: What actually happened, to explain a failure.
+    """
+
     name: str
     passed: bool
     detail: str = ""
 
 
 def normalize(text: str) -> str:
-    """Lowercase, and drop thousands separators so "4,267,635,650" matches "4267635650"."""
+    """Lowercase, and drop thousands separators so "4,267,635,650" matches "4267635650".
+
+    Args:
+        text: An answer, or a string to look for in one.
+
+    Returns:
+        The normalized text.
+    """
     return re.sub(r"(?<=\d)[,\s](?=\d{3}\b)", "", text).lower()
 
 
 def grade(result: RunResult, expect: Expect) -> list[Check]:
-    assistant_turns = [m for m in result.messages if m.role == "assistant"]
-    calls = [c for m in assistant_turns for c in m.tool_calls]
-    called = [c.name for c in calls]
+    """Check one run against a case's expectations.
+
+    Args:
+        result: The finished agent run.
+        expect: The case's expectations. Only the fields that are set become checks,
+            plus "finished", which every run gets.
+
+    Returns:
+        One Check per expectation, in a fixed order.
+    """
+    assistant_turns = [message for message in result.messages if message.role == "assistant"]
+    calls = [tool_call for message in assistant_turns for tool_call in message.tool_calls]
+    called = [call.name for call in calls]
     tool_errors = [
-        m.content
-        for m in result.messages
-        if m.role == "tool" and (m.content or "").startswith("Error:")
+        message.content
+        for message in result.messages
+        if message.role == "tool" and (message.content or "").startswith("Error:")
     ]
     answer = normalize(result.answer or "")
 
@@ -52,7 +77,7 @@ def grade(result: RunResult, expect: Expect) -> list[Check]:
             )
         )
     if expect.parallel:
-        turns_with_calls = sum(1 for m in assistant_turns if m.tool_calls)
+        turns_with_calls = sum(1 for message in assistant_turns if message.tool_calls)
         checks.append(
             Check(
                 "calls in one turn",

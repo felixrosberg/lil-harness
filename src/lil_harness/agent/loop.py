@@ -15,6 +15,17 @@ StopReason = Literal["final_answer", "max_steps"]
 
 @dataclass
 class RunResult:
+    """How an agent run ended.
+
+    Attributes:
+        answer: The model's final text, or None if it ran out of steps.
+        messages: The full history: the messages you passed in, then every assistant
+            and tool message the run added.
+        steps: How many times the model was called.
+        stop_reason: "final_answer" if the model replied without tool calls,
+            "max_steps" if it was still calling tools when the budget ran out.
+    """
+
     answer: str | None
     messages: list[Message]
     steps: int
@@ -30,7 +41,16 @@ async def run_agent(
 ) -> RunResult:
     """Run until the model replies without tool calls, or `max_steps` model calls are used.
 
-    `messages` is copied, not modified; the full history is returned in the result.
+    Args:
+        backend: The model to talk to.
+        registry: The tools the model may call. Its `specs()` are sent with every call.
+        messages: The conversation so far, usually a system and a user message. It is
+            copied, not modified.
+        max_steps: The most model calls to make. Stops a model that keeps calling
+            tools forever.
+
+    Returns:
+        The final answer, the full history, and why the run stopped.
     """
     history = list(messages)
     tools = registry.specs()

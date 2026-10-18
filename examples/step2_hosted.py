@@ -16,6 +16,7 @@ registry = default_registry()
 
 
 async def main() -> None:
+    """Ask the question from the command line to the model in LIL_MODEL, and print the run."""
     question = " ".join(sys.argv[1:]) or "What is 1234 * 5678, and what time is it in UTC?"
     backend = OpenAICompatBackend.from_env()
     print(f"model: {backend.model}\n")

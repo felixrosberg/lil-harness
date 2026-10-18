@@ -13,7 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Expect(BaseModel):
-    """Checks for one case. Every check that is set must pass."""
+    """Checks for one case. Every check that is set must pass.
+
+    Each field's description (below) says what it checks; `checks.grade` turns them
+    into pass/fail results.
+    """
 
     # Reject typos like `answer_contain:` instead of silently ignoring them.
     model_config = ConfigDict(extra="forbid")
@@ -37,9 +41,19 @@ class Expect(BaseModel):
 
 
 class Case(BaseModel):
+    """One eval case, as written in a YAML file.
+
+    Attributes:
+        id: A unique name, shown in the report.
+        prompt: The user message the model gets.
+        tools: Which built-in tools to offer. None offers all of them.
+        tags: Labels for grouping scores; the file name is added automatically.
+        expect: What a good run looks like.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    name: str
     prompt: str
     tools: list[str] | None = Field(None, description="Tools to offer. Default: all built-ins.")
     tags: list[str] = Field(default_factory=list)
@@ -47,7 +61,18 @@ class Case(BaseModel):
 
 
 def load_cases(directory: Path) -> list[Case]:
-    """Load every case from the .yaml files in `directory`, in file and list order."""
+    """Load every case from the .yaml files in `directory`, in file and list order.
+
+    Args:
+        directory: The folder with the case files, usually evals/cases.
+
+    Returns:
+        All cases, each tagged with its file's name.
+
+    Raises:
+        ValueError: If a file isn't a list, or two cases share an id.
+        pydantic.ValidationError: If a case has a typo or a wrong type.
+    """
     cases: list[Case] = []
     for path in sorted(directory.glob("*.yaml")):
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
@@ -60,8 +85,8 @@ def load_cases(directory: Path) -> list[Case]:
                 case.tags.append(path.stem)
             cases.append(case)
 
-    ids = [c.id for c in cases]
-    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    case_names = [case.name for case in cases]
+    duplicates = sorted({i for i in case_names if case_names.count(i) > 1})
     if duplicates:
         raise ValueError(f"Duplicate case ids: {', '.join(duplicates)}")
     return cases

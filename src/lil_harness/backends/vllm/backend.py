@@ -20,6 +20,8 @@ DEFAULT_BASE_URL = "http://localhost:8000/v1"
 
 
 class VLLMBackend(OpenAICompatBackend):
+    """An OpenAICompatBackend with vLLM's address, model detection and a thinking switch."""
+
     def __init__(
         self,
         model: str | None = None,
@@ -28,10 +30,16 @@ class VLLMBackend(OpenAICompatBackend):
         enable_thinking: bool = False,
         **kwargs: Any,
     ) -> None:
-        """
-        model: the name the server was started with. Leave it out to ask the server.
-        enable_thinking: for hybrid reasoning models like Qwen3. Off by default: on a
-            small GPU, thinking costs a lot of tokens and rarely helps simple tool calls.
+        """Set up a backend for the model a vLLM server is running.
+
+        Args:
+            model: The name the server was started with. Leave it out to ask the
+                server on the first call.
+            base_url: Where the vLLM server listens.
+            enable_thinking: For hybrid reasoning models like Qwen3. Off by default: on
+                a small GPU, thinking costs a lot of tokens and rarely helps simple
+                tool calls.
+            **kwargs: Passed on to OpenAICompatBackend, e.g. temperature.
         """
         extra_body = dict(kwargs.pop("extra_body", None) or {})
         # vLLM passes chat_template_kwargs into the model's chat template. Qwen3's
@@ -40,13 +48,29 @@ class VLLMBackend(OpenAICompatBackend):
         super().__init__(model or "", base_url, extra_body=extra_body, **kwargs)
 
     async def served_model(self) -> str:
-        """Ask the server which model it is running (GET /v1/models)."""
+        """Ask the server which model it is running (GET /v1/models).
+
+        Returns:
+            The first model's id. A vLLM server serves one model.
+
+        Raises:
+            RuntimeError: If the server lists no models.
+        """
         page = await self.client.models.list()
         if not page.data:
             raise RuntimeError("The vLLM server reports no models")
         return page.data[0].id
 
     async def complete(self, messages: list[Message], tools: list[ToolSpec]) -> AssistantTurn:
+        """Like OpenAICompatBackend.complete, but finds the model name first if needed.
+
+        Args:
+            messages: The conversation so far.
+            tools: The tools the model may call.
+
+        Returns:
+            The model's turn.
+        """
         if not self.model:
             self.model = await self.served_model()
         return await super().complete(messages, tools)

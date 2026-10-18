@@ -7,7 +7,7 @@ import pytest
 from lil_harness.agent.loop import RunResult
 from lil_harness.evals.cases import Case, Expect, load_cases
 from lil_harness.evals.checks import grade, normalize
-from lil_harness.evals.runner import RunRecord, run_suite, summarize
+from lil_harness.evals.runner import CallRecord, PassCount, RunRecord, run_suite, summarize
 from lil_harness.tools.registry import ToolSpec
 from lil_harness.types import AssistantTurn, Message, ToolCall
 
@@ -105,12 +105,12 @@ class ScriptedByPrompt:
 async def test_run_suite_end_to_end():
     cases = [
         Case(
-            id="good",
+            name="good",
             prompt="3*4?",
             expect=Expect(tools_called=["calculate"], answer_contains=["12"]),
         ),
-        Case(id="lazy", prompt="5*5?", expect=Expect(tools_called=["calculate"])),
-        Case(id="boom", prompt="crash", expect=Expect()),
+        Case(name="lazy", prompt="5*5?", expect=Expect(tools_called=["calculate"])),
+        Case(name="boom", prompt="crash", expect=Expect()),
     ]
     backend = ScriptedByPrompt(
         {
@@ -135,11 +135,13 @@ async def test_run_suite_end_to_end():
     records = await run_suite(cases, backend, repeats=2, concurrency=3)
     s = summarize(records)
 
-    assert s.by_case == {"good": (2, 2), "lazy": (0, 2), "boom": (0, 2)}
+    assert s.by_case == {"good": PassCount(2, 2), "lazy": PassCount(0, 2), "boom": PassCount(0, 2)}
     assert s.crashed == 2
     assert s.tool_calls == 2 and s.tool_errors == 0
     good = next(r for r in records if r.case_id == "good")
-    assert good.tool_calls == [("calculate", '{"a": 3, "b": 4, "op": "multiply"}', False)]
+    assert good.tool_calls == [
+        CallRecord("calculate", '{"a": 3, "b": 4, "op": "multiply"}', failed=False)
+    ]
     # "good" called it twice (2 tp), "lazy" skipped it twice (2 fn), "boom" crashed and
     # is left out.
     calc = s.tool_scores["calculate"]
@@ -151,7 +153,7 @@ async def test_run_suite_end_to_end():
 def record(case_id, expected, called, passed=True):
     return RunRecord(
         case_id, 0, [], passed,
-        tool_calls=[(name, "{}", False) for name in called], expected_tools=expected,
+        tool_calls=[CallRecord(name, "{}", False) for name in called], expected_tools=expected,
     )  # fmt: skip
 
 

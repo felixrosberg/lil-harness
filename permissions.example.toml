@@ -4,6 +4,7 @@
 # Keep this file outside the folder the model works in, or it is protected
 # automatically: the model can read it but not change it.
 
+# "strict": everything asks you first, reads included.
 # "default": reads run, writes and commands ask you first.
 # "readonly": reads run, writes and commands aren't offered at all.
 # "auto": everything runs without asking. Only inside a throwaway sandbox.

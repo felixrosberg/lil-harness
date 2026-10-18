@@ -68,7 +68,19 @@ def main(
     rules: Path | None,
     max_steps: int,
 ) -> None:
-    """Give a local model a coding task in a folder."""
+    """Give a local model a coding task in a folder.
+
+    \f
+    Args:
+        engine: "ollama" or "vllm".
+        task: The task, as separate words. Defaults to fixing the sample project.
+        model: The model name, or None for the engine's default.
+        think: Turn on thinking mode.
+        workspace: The folder to work in, or None for a fresh copy of the sample.
+        preset: Overrides the rules file's preset; "default" if neither is given.
+        rules: A TOML permission rules file.
+        max_steps: The step budget for the agent loop.
+    """
     if workspace is None:
         workspace = Path(tempfile.mkdtemp(prefix="lil_harness_")) / "sample_project"
         shutil.copytree(SAMPLE, workspace)
@@ -91,6 +103,20 @@ async def run(
     policy: PermissionPolicy,
     max_steps: int,
 ) -> None:
+    """Run the agent on the task and print every call and result.
+
+    Args:
+        engine: "ollama" or "vllm".
+        task: What to do.
+        model: The model name, or None for the engine's default.
+        think: Turn on thinking mode.
+        tools: The coding tools, already bound to the workspace.
+        policy: The permission policy, with the terminal as approver.
+        max_steps: The step budget for the agent loop.
+
+    Raises:
+        click.ClickException: If the server can't be reached.
+    """
     backend_cls = OllamaBackend if engine == "ollama" else VLLMBackend
     backend = backend_cls(enable_thinking=think, **({"model": model} if model else {}))
     registry = tools.registry(policy)

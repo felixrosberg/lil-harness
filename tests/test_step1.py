@@ -137,3 +137,32 @@ def test_tools_from_modules_with_postponed_annotations():
 
     (spec,) = default_registry(["calculate"]).specs()
     assert spec.parameters["properties"]["op"]["enum"] == ["add", "subtract", "multiply", "divide"]
+
+
+def test_docstring_args_become_schema_descriptions():
+    registry = ToolRegistry()
+
+    @registry.tool
+    def resize(path: str, width: int, keep_aspect: bool = True) -> str:
+        """Resize an image.
+
+        Args:
+            path: The image file.
+            width: New width in pixels. Height follows
+                from the aspect ratio.
+            keep_aspect (bool): Keep the proportions.
+
+        Returns:
+            The path of the resized image.
+        """
+        return path
+
+    spec = registry.specs()[0]
+    # Only the summary goes in the description; Returns is for people.
+    assert spec.description == "Resize an image."
+    props = spec.parameters["properties"]
+    assert props["path"]["description"] == "The image file."
+    assert props["width"]["description"] == (
+        "New width in pixels. Height follows from the aspect ratio."
+    )
+    assert props["keep_aspect"]["description"] == "Keep the proportions."

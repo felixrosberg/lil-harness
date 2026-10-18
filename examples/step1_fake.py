@@ -15,12 +15,24 @@ registry = ToolRegistry()
 
 
 @registry.tool
-def calculate(a: float, b: float, op: Literal["add", "subtract", "multiply", "divide"]):
-    """Do basic arithmetic on two numbers. Use this instead of doing math in your head."""
+def calculate(
+    a: float, b: float, op: Literal["add", "subtract", "multiply", "divide"]
+) -> float | None:
+    """Do basic arithmetic on two numbers. Use this instead of doing math in your head.
+
+    Args:
+        a: The first number.
+        b: The second number.
+        op: Which operation to apply, as `a op b`.
+
+    Returns:
+        The result, or None when dividing by zero.
+    """
     return {"add": a + b, "subtract": a - b, "multiply": a * b, "divide": a / b if b else None}[op]
 
 
 async def main() -> None:
+    """Print the tool's schema, then run one scripted round trip and print the history."""
     print("Schema the model would see:")
     for spec in registry.specs():
         print(f"  {spec.name}: {spec.parameters}\n")
