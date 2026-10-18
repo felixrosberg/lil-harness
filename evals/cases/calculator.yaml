@@ -1,0 +1,74 @@
+# Cases for the `calculate` tool. Each case asks one question and lists what a good
+# run looks like. All checks under `expect` must pass. See src/lil_harness/evals/cases.py
+# for every available check.
+
+- id: multiply_basic
+  prompt: What is 3847 * 29?
+  tags: [single_call]
+  expect:
+    tools_called: [calculate]
+    answer_contains: ["111563"]
+    max_steps: 3
+
+- id: multiply_large
+  prompt: What is 98765 times 43210?
+  tags: [single_call]
+  expect:
+    tools_called: [calculate]
+    answer_contains: ["4267635650"]
+
+- id: subtract_negative
+  prompt: What is 250 minus 1000?
+  tags: [single_call]
+  expect:
+    tools_called: [calculate]
+    answer_matches: '-\s?750'
+
+- id: divide_decimals
+  prompt: What is 7.5 divided by 2.5?
+  tags: [single_call]
+  expect:
+    tools_called: [calculate]
+    answer_matches: '\b3(\.0+)?\b'
+
+- id: two_independent
+  prompt: What is 12 times 7, and what is 99 divided by 3?
+  tags: [parallel]
+  expect:
+    tools_called: [calculate]
+    min_tool_calls: 2
+    parallel: true
+    answer_contains: ["84", "33"]
+
+- id: chained
+  prompt: Multiply 17 by 23, then add 100 to the result.
+  tags: [multi_step]
+  expect:
+    tools_called: [calculate]
+    min_tool_calls: 2
+    answer_contains: ["491"]
+
+- id: word_problem
+  prompt: I have 3 boxes with 48 apples each, and I eat 17 apples. How many apples are left?
+  tags: [multi_step]
+  expect:
+    tools_called: [calculate]
+    answer_matches: '\b127\b'
+
+- id: percent
+  # There's no percent operation, so the model has to rephrase it (0.15 * 80, or 80 * 15 / 100).
+  prompt: What is 15% of 80?
+  tags: [argument_mapping]
+  expect:
+    tools_called: [calculate]
+    answer_matches: '\b12(\.0+)?\b'
+
+- id: divide_by_zero
+  # The tool fails here on purpose. A good run reports that it's undefined, without looping.
+  prompt: What is 5 divided by 0?
+  tags: [errors]
+  expect:
+    tools_called: [calculate]
+    no_tool_errors: false
+    answer_matches: "undefined|not defined|cannot|can't|not possible|impossible|infinit|zero"
+    max_steps: 3

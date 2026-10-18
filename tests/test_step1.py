@@ -129,3 +129,11 @@ async def test_async_tools_are_awaited():
     result = await reg.execute(call("echo", text="hello"))
     assert result.content == "hello"
     assert not result.is_error
+
+
+def test_tools_from_modules_with_postponed_annotations():
+    # builtin.py uses `from __future__ import annotations`, so its hints are strings.
+    from lil_harness.tools.builtin import default_registry
+
+    (spec,) = default_registry(["calculate"]).specs()
+    assert spec.parameters["properties"]["op"]["enum"] == ["add", "subtract", "multiply", "divide"]

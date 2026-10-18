@@ -8,7 +8,11 @@ dependencies = [
     "click>=8.1",
     "openai>=3.0",
     "pydantic>=2.7",
+    "pyyaml>=6",
 ]
+
+[project.scripts]
+lil-eval = "lil_harness.evals.cli:main"
 
 [dependency-groups]
 dev = [

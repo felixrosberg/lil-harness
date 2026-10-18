@@ -1,0 +1,19 @@
+# Cases for `current_time_utc`. The model can't know the current time, so it has to ask.
+# The answers change every run, so these only check that the right tool was used.
+
+- id: time_now
+  prompt: What time is it right now in UTC?
+  expect:
+    tools_called: [current_time_utc]
+
+- id: what_year
+  prompt: What year is it?
+  expect:
+    tools_called: [current_time_utc]
+
+- id: right_tool_only
+  # Both tools are offered; only the clock is needed.
+  prompt: What is today's date?
+  expect:
+    tools_called: [current_time_utc]
+    max_steps: 2

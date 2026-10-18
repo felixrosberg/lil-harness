@@ -11,7 +11,7 @@ import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ValidationError, create_model
 
@@ -38,12 +38,15 @@ class ToolSpec:
 
 
 def _args_model_from_signature(fn: Callable[..., Any]) -> type[BaseModel]:
+    # get_type_hints turns string annotations (from `from __future__ import annotations`
+    # in the tool's module) back into real types, using that module's imports.
+    hints = get_type_hints(fn, include_extras=True)
     fields: dict[str, Any] = {}
     for param in inspect.signature(fn).parameters.values():
-        if param.annotation is inspect.Parameter.empty:
+        if param.name not in hints:
             raise TypeError(f"Tool {fn.__name__!r}: parameter {param.name!r} needs a type hint")
         default = ... if param.default is inspect.Parameter.empty else param.default
-        fields[param.name] = (param.annotation, default)
+        fields[param.name] = (hints[param.name], default)
     return create_model(f"{fn.__name__}_args", **fields)
 
 
@@ -86,6 +89,13 @@ class ToolRegistry:
         if spec is None:
             available = ", ".join(sorted(self._tools)) or "none"
             return self._error(call, f"Unknown tool {call.name!r}. Available tools: {available}.")
+
+        if call.arguments_error is not None:
+            return self._error(
+                call,
+                f"Arguments for {call.name!r} were not valid JSON ({call.arguments_error}). "
+                f"You sent: {call.raw_arguments!r}",
+            )
 
         try:
             args = spec.args_model.model_validate(call.arguments)

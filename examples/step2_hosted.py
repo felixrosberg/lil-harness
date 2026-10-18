@@ -6,27 +6,13 @@ Set LIL_BASE_URL, LIL_MODEL and LIL_API_KEY (see the README), then run:
 
 import asyncio
 import sys
-from datetime import UTC, datetime
-from typing import Literal
 
 from lil_harness.agent.loop import run_agent
 from lil_harness.backends.openai_compat import OpenAICompatBackend
-from lil_harness.tools.registry import ToolRegistry
+from lil_harness.tools.builtin import default_registry
 from lil_harness.types import Message
 
-registry = ToolRegistry()
-
-
-@registry.tool
-def calculate(a: float, b: float, op: Literal["add", "subtract", "multiply", "divide"]):
-    """Do basic arithmetic on two numbers. Use this instead of doing math in your head."""
-    return {"add": a + b, "subtract": a - b, "multiply": a * b, "divide": a / b}[op]
-
-
-@registry.tool
-def current_time_utc() -> str:
-    """Get the current date and time in UTC, in ISO 8601 format."""
-    return datetime.now(UTC).isoformat(timespec="seconds")
+registry = default_registry()
 
 
 async def main() -> None:
