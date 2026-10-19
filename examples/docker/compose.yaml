@@ -1,0 +1,69 @@
+# The sandbox: a GPU model server, and an agent that can reach it and nothing else.
+#
+#   docker compose up -d ollama                              # start the model server
+#   docker compose exec ollama ollama pull qwen3.5:4b        # once: models live in a volume
+#   docker compose run --rm agent                            # the demo: fix the sample bug
+#
+# See README.md in this folder for what each setting does.
+name: lil-harness-sandbox
+
+services:
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      # Room for the coding tools' descriptions plus a few file reads.
+      OLLAMA_CONTEXT_LENGTH: "8192"
+    networks:
+      - sandbox    # where the agent finds it
+      - internet   # so `ollama pull` works
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: examples/docker/Dockerfile
+    image: lil-harness-sandbox
+    depends_on:
+      - ollama
+    environment:
+      LIL_BASE_URL: http://ollama:11434/v1
+      LIL_MODEL: ${LIL_MODEL:-qwen3.5:4b}
+    # The demo. `docker compose run --rm agent "your task"` replaces all of it.
+    command:
+      - --seed
+      - /app/seeds/sample_project
+      - --check
+      - python test_stats.py
+      - The test in test_stats.py fails. Find the bug in stats.py and fix it.
+    volumes:
+      - ./workspace:/workspace   # the only files the agent can change
+      - ./output:/output         # run.json lands here
+    networks:
+      - sandbox                  # internal: the model server, no internet
+    # Lock the container down. The agent can still do anything inside /workspace.
+    read_only: true              # the rest of the filesystem can't be changed
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL                      # no special Linux privileges
+    security_opt:
+      - no-new-privileges:true   # and no way to gain them (e.g. via sudo or setuid)
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 256              # stops a runaway fork loop
+
+networks:
+  sandbox:
+    internal: true               # no route out of this network
+  internet: {}
+
+volumes:
+  ollama-models:

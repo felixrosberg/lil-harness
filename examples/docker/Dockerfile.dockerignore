@@ -1,0 +1,8 @@
+# Only what the Dockerfile copies; keeps the build fast and secrets out of the image.
+*
+!pyproject.toml
+!README.md
+!src/
+!examples/docker/run_task.py
+!examples/sample_project/
+**/__pycache__
