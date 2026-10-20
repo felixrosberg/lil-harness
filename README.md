@@ -255,12 +255,12 @@ docker compose run --rm agent
 
 | File | What it shows |
 | --- | --- |
-| `examples/step1_fake.py` | The agent loop with a scripted model; no GPU needed. |
-| `examples/step2_hosted.py` | A hosted OpenAI-compatible API. |
-| `examples/step3_local.py` | A local model on Ollama or vLLM. |
-| `examples/step5_coding.py` | The coding tools fixing a bug, asking before each change. |
-| `examples/step6_rag.py` | Questions over a folder, answered with search and citations. |
-| `examples/step7_media.py` | Labelling images and asking about a video. |
+| `examples/fake.py` | The agent loop with a scripted model; no GPU needed. |
+| `examples/hosted.py` | A hosted OpenAI-compatible API. |
+| `examples/local.py` | A local model on Ollama or vLLM. |
+| `examples/coding.py` | The coding tools fixing a bug, asking before each change. |
+| `examples/rag.py` | Questions over a folder, answered with search and citations. |
+| `examples/media.py` | Labelling images and asking about a video. |
 | `examples/docker/` | A sandboxed deployment with a model server. |
 
 ## Evaluate
