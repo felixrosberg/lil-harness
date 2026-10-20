@@ -1,4 +1,4 @@
-"""Step 7 demo: a model that can see, labelling images and answering questions about video.
+"""A model that can see, labelling images and answering questions about video.
 
 Needs the media extra and a vision model. Check yours can see with `ollama show
 qwen3.5:4b`: "vision" should be under Capabilities.
@@ -7,11 +7,11 @@ qwen3.5:4b`: "vision" should be under Capabilities.
 Label every image in a folder, one fresh conversation per image, and save the labels
 to labels.jsonl. Without --folder it makes sample images whose answers it knows, and
 scores the model:
-    uv run python examples/step7_media.py annotate ollama --model qwen3.5:4b
+    uv run python examples/media.py annotate ollama --model qwen3.5:4b
 
 Ask about images or videos in a folder (default: the samples, with a short clip):
-    uv run python examples/step7_media.py ask ollama --model qwen3.5:4b
-    uv run python examples/step7_media.py ask ollama --folder D:\\clips -q "What happens?"
+    uv run python examples/media.py ask ollama --model qwen3.5:4b
+    uv run python examples/media.py ask ollama --folder D:\\clips -q "What happens?"
 
 For your own labels, give --folder and --prompt saying which JSON fields you want.
 """

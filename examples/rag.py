@@ -1,9 +1,9 @@
-"""Step 6 demo: ask questions about a folder of docs and code, answered with search.
+"""Ask questions about a folder of docs and code, answered with search.
 
 It indexes this repository (or --root), gives the model `search_docs` plus the
 read-only coding tools, and asks your question:
     ollama pull nomic-embed-text
-    uv run python examples/step6_rag.py ollama --model qwen3.5:4b "How do permissions work?"
+    uv run python examples/rag.py ollama --model qwen3.5:4b "How do permissions work?"
 
 The index is saved in .lil_index/ and reused until a file changes. Try
 --embedder hash to run without an embedding model: search then only matches words.

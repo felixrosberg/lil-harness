@@ -1,12 +1,12 @@
-"""Step 5 demo: a local model fixing a bug with the coding tools.
+"""A local model fixing a bug with the coding tools.
 
 By default it copies examples/sample_project (a stats module with a bug and a failing
 test) to a temporary folder and asks the model to fix it, so the original stays broken
 and you can run it again:
-    uv run python examples/step5_coding.py ollama --model qwen3.5:4b
+    uv run python examples/coding.py ollama --model qwen3.5:4b
 
 Point it at your own folder with --workspace, and give it a task:
-    uv run python examples/step5_coding.py ollama --workspace C:\\code\\app "Add docstrings"
+    uv run python examples/coding.py ollama --workspace C:\\code\\app "Add docstrings"
 
 Every write and command asks you first. Change that with --permissions (readonly,
 default or auto) and --rules FILE (see permissions.example.toml), for example to let

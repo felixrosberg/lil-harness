@@ -1,7 +1,7 @@
-"""Step 2 demo: the same agent loop, now talking to a real model.
+"""Agent loop, now talking to a real model.
 
 Set LIL_BASE_URL, LIL_MODEL and LIL_API_KEY (see the README), then run:
-    uv run python examples/step2_hosted.py "What is 1234 * 5678, and what time is it in UTC?"
+    uv run python examples/hosted.py "What is 1234 * 5678, and what time is it in UTC?"
 """
 
 import asyncio

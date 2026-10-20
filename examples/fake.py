@@ -1,6 +1,6 @@
-"""Step 1 demo: one full tool-use round trip with a scripted fake model.
+"""One full tool-use round trip with a scripted fake model.
 
-Run with: uv run python examples/step1_fake.py
+Run with: uv run python examples/fake.py
 """
 
 import asyncio

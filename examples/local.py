@@ -1,8 +1,8 @@
-"""Step 3 demo: the agent loop against a model running on your own GPU.
+"""The agent loop against a model running on your own GPU.
 
 Start Ollama or vLLM first (see the README), then run one of:
-    uv run python examples/step3_local.py ollama "What is 1234 * 5678?"
-    uv run python examples/step3_local.py vllm "What is 1234 * 5678?"
+    uv run python examples/local.py ollama "What is 1234 * 5678?"
+    uv run python examples/local.py vllm "What is 1234 * 5678?"
 
 Add --think to turn on Qwen3's thinking mode, or --model NAME to try another model,
 for example --model qwen3.5:4b with Ollama. Run with --help to see all options.
