@@ -16,7 +16,7 @@ from openai import AsyncOpenAI
 from lil_harness.agent.loop import run_agent
 from lil_harness.backends.openai_compat import OpenAICompatBackend
 from lil_harness.tools.registry import ToolRegistry
-from lil_harness.types import Message
+from lil_harness.types import Message, Usage
 
 
 @pytest.fixture
@@ -164,3 +164,16 @@ async def test_thinking_is_kept_but_not_sent_back(field):
     # On the next request, the earlier thinking is not part of the history we send.
     await run_agent(backend, ToolRegistry(), [*first.messages, Message.user("bye")])
     assert all("reasoning" not in m and "thinking" not in m for m in requests[1]["messages"])
+
+
+async def test_token_usage_is_reported():
+    body = completion(content="hi") | {
+        "usage": {"prompt_tokens": 120, "completion_tokens": 5, "total_tokens": 125}
+    }
+    backend, _ = fake_server(body, completion(content="hi"))
+
+    with_usage = await backend.complete([Message.user("hi")], [])
+    without_usage = await backend.complete([Message.user("hi")], [])
+
+    assert with_usage.usage == Usage(prompt_tokens=120, completion_tokens=5)
+    assert without_usage.usage is None

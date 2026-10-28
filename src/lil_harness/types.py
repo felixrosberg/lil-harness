@@ -127,6 +127,20 @@ class Message:
 
 
 @dataclass
+class Usage:
+    """How many tokens one model call used, as the server counted them.
+
+    Attributes:
+        prompt_tokens: The tokens the model read: the whole conversation sent, plus the
+            tool definitions. Compare it with the context length to see how full it is.
+        completion_tokens: The tokens it wrote in reply.
+    """
+
+    prompt_tokens: int
+    completion_tokens: int
+
+
+@dataclass
 class AssistantTurn:
     """What a backend returns for one model call.
 
@@ -136,12 +150,14 @@ class AssistantTurn:
         finish_reason: Why generation stopped, as the server reported it, for example
             "stop", "tool_calls" or "length" (hit the token limit).
         reasoning: The model's thinking, if the server returned it.
+        usage: Token counts for this call, if the server reported them.
     """
 
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
     reasoning: str | None = None
+    usage: Usage | None = None
 
     def to_message(self) -> Message:
         """Turn this turn into an assistant message for the history.

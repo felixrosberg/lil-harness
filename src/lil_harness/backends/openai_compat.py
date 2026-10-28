@@ -14,7 +14,7 @@ from typing import Any, TypeAlias
 from openai import AsyncOpenAI
 
 from lil_harness.tools.registry import ToolSpec
-from lil_harness.types import AssistantTurn, Message, ToolArgs, ToolCall
+from lil_harness.types import AssistantTurn, Message, ToolArgs, ToolCall, Usage
 
 # The OpenAI wire format is plain JSON. These names say which piece of it a dict is.
 OpenAIRequest: TypeAlias = dict[str, Any]
@@ -117,6 +117,9 @@ class OpenAICompatBackend:
             tool_calls=[tool_call_from_openai(call) for call in choice.message.tool_calls or []],
             finish_reason=choice.finish_reason,
             reasoning=reasoning_from_openai(choice.message),
+            usage=Usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+            if response.usage
+            else None,
         )
 
 
