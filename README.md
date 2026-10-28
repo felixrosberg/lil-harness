@@ -191,7 +191,54 @@ async def main(folder: Path) -> None:
 asyncio.run(main(Path("photos")))
 ```
 
-`examples/step7_media.py` is a complete version of this, with JSON parsing and scoring against known answers.
+`examples/media.py` is a complete version of this, with JSON parsing and scoring against known answers.
+
+## Example: answer questions from your documents
+
+RAG (retrieval-augmented generation) lets the model answer from your files instead of from memory. lil-harness splits the files into chunks, embeds them, and gives the model a `search_docs` tool. The model decides when to search, can search again with other words, and cites `file:lines`. It runs a hybrid search, combining keyword (BM25) and semantic results, and can optionally rerank the top results.
+
+You need an embedding model alongside the chat model: `ollama pull nomic-embed-text`.
+
+```python
+import asyncio
+from pathlib import Path
+
+from lil_harness.agent.loop import run_agent
+from lil_harness.backends.openai_compat import OpenAICompatBackend
+from lil_harness.permissions import PermissionPolicy
+from lil_harness.rag.embeddings import OllamaEmbedder
+from lil_harness.rag.index import ensure_index
+from lil_harness.rag.tools import RagTools
+from lil_harness.tools.coding import CodingTools
+from lil_harness.types import Message
+
+SYSTEM = """You answer questions about the files in a folder.
+Search with search_docs first; read_file around a result if it's cut off.
+Answer only from what you found, and cite each fact as (file:lines)."""
+
+
+async def main(docs: Path, question: str) -> None:
+    embedder = OllamaEmbedder()  # nomic-embed-text on the local Ollama
+    # Builds the index on the first run and saves it in docs/.lil_index;
+    # later runs reuse it until a file is added, removed or changed.
+    index, _ = await ensure_index(docs, docs / ".lil_index", embedder)
+
+    # Read-only: the model can search and read files, but not change anything.
+    registry = CodingTools(docs).registry(PermissionPolicy.preset("readonly"))
+    RagTools(index, embedder).register(registry)
+
+    backend = OpenAICompatBackend.from_env()
+    messages = [Message.system(SYSTEM), Message.user(question)]
+    result = await run_agent(backend, registry, messages, max_steps=10)
+    print(result.answer)
+
+
+asyncio.run(main(Path("handbook"), "How many vacation days do new employees get?"))
+```
+
+By default it indexes `.md`, `.py`, `.txt`, `.yaml` and `.toml` files. Pass `patterns=("**/*.rst",)` to `ensure_index` for other file types. To rerank each search's top 20 results with your chat model, pass `RagTools(index, embedder, reranker=LLMReranker(backend))`, using `LLMReranker` from `lil_harness.rag.rerank`. Use `CrossEncoderReranker()` instead if you have the `rerank` extra installed.
+
+To check search quality before trusting the answers, add questions to `evals/retrieval/` and run `uv run lil-rag-eval -v`. It reports how often the right file is in the top 5 results. `examples/rag.py` is a complete command-line version.
 
 ## Deploy a task
 

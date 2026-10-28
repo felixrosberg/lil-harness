@@ -16,14 +16,14 @@ from lil_harness.backends.openai_compat import messages_to_openai  # noqa: E402
 from lil_harness.tools.media import MediaTools, clock, load_image  # noqa: E402
 from lil_harness.types import AssistantTurn, Message, ToolCall  # noqa: E402
 
-EXAMPLE = Path(__file__).parent.parent / "examples" / "step7_media.py"
+EXAMPLE = Path(__file__).parent.parent / "examples" / "media.py"
 
 
 def call(name, **arguments):
     return ToolCall(id=f"call_{name}", name=name, arguments=arguments)
 
 
-spec = importlib.util.spec_from_file_location("step7_media", EXAMPLE)
+spec = importlib.util.spec_from_file_location("media_example", EXAMPLE)
 step7 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(step7)
 

@@ -1,5 +1,5 @@
 # Permission rules for the coding tools. Copy to permissions.toml and edit.
-# Use with: uv run python examples/step5_coding.py --rules permissions.toml
+# Use with: uv run python examples/coding.py --rules permissions.toml
 #
 # Keep this file outside the folder the model works in, or it is protected
 # automatically: the model can read it but not change it.

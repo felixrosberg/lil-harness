@@ -1,8 +1,9 @@
+import asyncio
 from typing import Literal
 
 import pytest
 
-from lil_harness.agent.loop import run_agent
+from lil_harness.agent.loop import StepEvent, ToolEvent, TurnEvent, run_agent
 from lil_harness.backends.fake import FakeBackend
 from lil_harness.tools.registry import ToolRegistry
 from lil_harness.types import AssistantTurn, Message, ToolCall
@@ -166,3 +167,35 @@ def test_docstring_args_become_schema_descriptions():
         "New width in pixels. Height follows from the aspect ratio."
     )
     assert props["keep_aspect"]["description"] == "Keep the proportions."
+
+
+async def test_on_step_reports_turns_and_tool_results(registry: ToolRegistry):
+    backend = FakeBackend(
+        script=[
+            AssistantTurn(tool_calls=[call("calculate", a=17, b=25, op="multiply")]),
+            AssistantTurn(content="425"),
+        ]
+    )
+    events: list[StepEvent] = []
+
+    await run_agent(backend, registry, [Message.user("17 * 25?")], on_step=events.append)
+
+    first, tool, last = events
+    assert isinstance(first, TurnEvent) and first.step == 1
+    assert first.turn.tool_calls[0].name == "calculate"
+    assert isinstance(tool, ToolEvent) and tool.step == 1
+    assert tool.call.id == "call_1" and tool.result.content == "425.0"
+    assert isinstance(last, TurnEvent) and last.step == 2 and last.turn.content == "425"
+
+
+async def test_on_step_can_be_async(registry: ToolRegistry):
+    backend = FakeBackend(script=[AssistantTurn(content="hi")])
+    seen: list[int] = []
+
+    async def record(event: StepEvent) -> None:
+        await asyncio.sleep(0)
+        seen.append(event.step)
+
+    await run_agent(backend, registry, [Message.user("hi")], on_step=record)
+
+    assert seen == [1]
