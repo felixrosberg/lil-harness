@@ -59,6 +59,28 @@ def clip(text: str, max_chars: int, hint: str = "") -> str:
     return f"{head}\n[... {cut} characters cut{'. ' + hint if hint else ''} ...]\n{tail}"
 
 
+def resolve_in(root: Path, path: str) -> Path:
+    """Turn a path from the model into an absolute path inside a workspace.
+
+    Args:
+        root: The workspace, already resolved.
+        path: A path relative to it.
+
+    Returns:
+        The resolved absolute path (symlinks followed).
+
+    Raises:
+        ToolError: If the path ends up outside the workspace.
+    """
+    target = (root / path).resolve()
+    if not target.is_relative_to(root):
+        raise ToolError(
+            f"{path!r} is outside the workspace. Use paths relative to the workspace "
+            "folder, like 'src/main.py'."
+        )
+    return target
+
+
 class CodingTools:
     """The coding tools, bound to one workspace folder."""
 
@@ -119,24 +141,8 @@ class CodingTools:
     # ---- helpers -------------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
-        """Turn a path from the model into an absolute path inside the workspace.
-
-        Args:
-            path: A path relative to the workspace.
-
-        Returns:
-            The resolved absolute path (symlinks followed).
-
-        Raises:
-            ToolError: If the path ends up outside the workspace.
-        """
-        target = (self.root / path).resolve()
-        if not target.is_relative_to(self.root):
-            raise ToolError(
-                f"{path!r} is outside the workspace. Use paths relative to the workspace "
-                "folder, like 'src/main.py'."
-            )
-        return target
+        """See `resolve_in`."""
+        return resolve_in(self.root, path)
 
     def _writable(self, path: str) -> Path:
         """Like `_resolve`, but also refuses protected files.

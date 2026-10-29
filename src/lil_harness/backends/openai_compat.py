@@ -14,7 +14,7 @@ from typing import Any, TypeAlias
 from openai import AsyncOpenAI
 
 from lil_harness.tools.registry import ToolSpec
-from lil_harness.types import AssistantTurn, Message, ToolArgs, ToolCall, Usage
+from lil_harness.types import AssistantTurn, Image, Message, ToolArgs, ToolCall, Usage
 
 # The OpenAI wire format is plain JSON. These names say which piece of it a dict is.
 OpenAIRequest: TypeAlias = dict[str, Any]
@@ -23,6 +23,9 @@ OpenAIMessage: TypeAlias = dict[str, Any]
 """One entry of the request's "messages", like {"role": "user", "content": "Hi"}."""
 OpenAITool: TypeAlias = dict[str, Any]
 """One entry of the request's "tools": {"type": "function", "function": {...}}."""
+
+DROPPED_IMAGE = "(An earlier image was left out here to save room. Look again if you need it.)"
+"""What's sent in place of an image beyond `max_images`."""
 
 
 class OpenAICompatBackend:
@@ -37,6 +40,7 @@ class OpenAICompatBackend:
         temperature: float = 0.0,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
+        max_images: int | None = None,
         client: AsyncOpenAI | None = None,
     ) -> None:
         """Set up the client. Nothing is sent until `complete` is called.
@@ -50,12 +54,16 @@ class OpenAICompatBackend:
             max_tokens: Cap on the reply's length. None lets the server decide.
             extra_body: Engine-specific request fields (vLLM's chat_template_kwargs,
                 Ollama's reasoning_effort, ...) that the SDK passes through untouched.
+            max_images: Send only the newest this many images; older ones become a
+                note. Each image costs hundreds of tokens, so a few fill a small
+                context. None sends them all.
             client: A ready-made client, so tests can plug in a fake transport.
         """
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.extra_body = extra_body or {}
+        self.max_images = max_images
         # Local servers usually ignore the key, but the SDK requires one.
         self.client = client or AsyncOpenAI(base_url=base_url, api_key=api_key or "EMPTY")
 
@@ -99,7 +107,7 @@ class OpenAICompatBackend:
         """
         request: OpenAIRequest = {
             "model": self.model,
-            "messages": [message_to_openai(message) for message in messages],
+            "messages": messages_to_openai(messages, max_images=self.max_images),
             "temperature": self.temperature,
         }
         # Some servers reject an empty tools list, so only send it when there are tools.
@@ -170,8 +178,9 @@ def message_to_openai(message: Message) -> OpenAIMessage:
         message: A message from the history.
 
     Returns:
-        The request dict for that message. Reasoning is left out on purpose: models
-        are trained to see their past answers, not their past thinking.
+        The request dict for that message, text only: `messages_to_openai` adds the
+        images. Reasoning is left out on purpose: models are trained to see their
+        past answers, not their past thinking.
     """
     if message.role == "tool":
         return {
@@ -195,6 +204,66 @@ def message_to_openai(message: Message) -> OpenAIMessage:
             }
             for tool_call in message.tool_calls
         ]
+    return out
+
+
+def image_part(image: Image) -> OpenAIMessage:
+    """Args: image: An image. Returns: it as one part of a message's content."""
+    return {"type": "image_url", "image_url": {"url": image.to_data_url()}}
+
+
+def messages_to_openai(
+    messages: list[Message], *, max_images: int | None = None
+) -> list[OpenAIMessage]:
+    """Convert the history to OpenAI's format, images included.
+
+    A user message with images gets its content as parts: the text, then the images.
+    Tool messages can only hold text, so a tool's images go into a user message right
+    after the run of tool messages they belong to (tool messages must directly follow
+    the assistant turn that called them). Each tool message with images says so.
+
+    Args:
+        messages: The history.
+        max_images: Keep only the newest this many images. The older ones are
+            replaced by DROPPED_IMAGE, so the model knows something was there.
+
+    Returns:
+        The request's "messages".
+    """
+    total = sum(len(message.images) for message in messages)
+    drop = total - max_images if max_images is not None and total > max_images else 0
+    counted = 0
+
+    def part(image: Image) -> OpenAIMessage:
+        nonlocal counted
+        counted += 1
+        return {"type": "text", "text": DROPPED_IMAGE} if counted <= drop else image_part(image)
+
+    out: list[OpenAIMessage] = []
+    shown: list[OpenAIMessage] = []  # tool images, waiting for the run of tools to end
+    for message in messages:
+        if message.role != "tool" and shown:
+            out.append({"role": "user", "content": shown})
+            shown = []
+        converted = message_to_openai(message)
+        if message.images and message.role == "tool":
+            many = len(message.images) > 1
+            note = "The images are" if many else "The image is"
+            converted["content"] += f"\n({note} in the next message.)"
+            label = "Images" if many else "Image"
+            shown.append(
+                {
+                    "type": "text",
+                    "text": f"{label} from {message.name} (call {message.tool_call_id}):",
+                }
+            )
+            shown += [part(image) for image in message.images]
+        elif message.images:
+            text = {"type": "text", "text": message.content or ""}
+            converted["content"] = [text, *(part(image) for image in message.images)]
+        out.append(converted)
+    if shown:
+        out.append({"role": "user", "content": shown})
     return out
 
 

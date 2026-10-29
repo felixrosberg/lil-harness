@@ -17,6 +17,10 @@ lil-eval = "lil_harness.evals.cli:main"
 lil-rag-eval = "lil_harness.rag.evaluate:main"
 
 [project.optional-dependencies]
+media = [
+    "av>=12",
+    "pillow>=10",
+]
 rerank = [
     "sentence-transformers>=3",
 ]

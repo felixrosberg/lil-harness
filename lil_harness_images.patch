@@ -1,0 +1,391 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index c465102..e5c4848 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,6 +17,10 @@ lil-eval = "lil_harness.evals.cli:main"
+ lil-rag-eval = "lil_harness.rag.evaluate:main"
+ 
+ [project.optional-dependencies]
++media = [
++    "av>=12",
++    "pillow>=10",
++]
+ rerank = [
+     "sentence-transformers>=3",
+ ]
+diff --git a/src/lil_harness/backends/openai_compat.py b/src/lil_harness/backends/openai_compat.py
+index ad003a2..e1f77e8 100644
+--- a/src/lil_harness/backends/openai_compat.py
++++ b/src/lil_harness/backends/openai_compat.py
+@@ -14,7 +14,7 @@ from typing import Any, TypeAlias
+ from openai import AsyncOpenAI
+ 
+ from lil_harness.tools.registry import ToolSpec
+-from lil_harness.types import AssistantTurn, Message, ToolArgs, ToolCall, Usage
++from lil_harness.types import AssistantTurn, Image, Message, ToolArgs, ToolCall, Usage
+ 
+ # The OpenAI wire format is plain JSON. These names say which piece of it a dict is.
+ OpenAIRequest: TypeAlias = dict[str, Any]
+@@ -24,6 +24,9 @@ OpenAIMessage: TypeAlias = dict[str, Any]
+ OpenAITool: TypeAlias = dict[str, Any]
+ """One entry of the request's "tools": {"type": "function", "function": {...}}."""
+ 
++DROPPED_IMAGE = "(An earlier image was left out here to save room. Look again if you need it.)"
++"""What's sent in place of an image beyond `max_images`."""
++
+ 
+ class OpenAICompatBackend:
+     """Talks to one model on one OpenAI-compatible server."""
+@@ -37,6 +40,7 @@ class OpenAICompatBackend:
+         temperature: float = 0.0,
+         max_tokens: int | None = None,
+         extra_body: dict[str, Any] | None = None,
++        max_images: int | None = None,
+         client: AsyncOpenAI | None = None,
+     ) -> None:
+         """Set up the client. Nothing is sent until `complete` is called.
+@@ -50,12 +54,16 @@ class OpenAICompatBackend:
+             max_tokens: Cap on the reply's length. None lets the server decide.
+             extra_body: Engine-specific request fields (vLLM's chat_template_kwargs,
+                 Ollama's reasoning_effort, ...) that the SDK passes through untouched.
++            max_images: Send only the newest this many images; older ones become a
++                note. Each image costs hundreds of tokens, so a few fill a small
++                context. None sends them all.
+             client: A ready-made client, so tests can plug in a fake transport.
+         """
+         self.model = model
+         self.temperature = temperature
+         self.max_tokens = max_tokens
+         self.extra_body = extra_body or {}
++        self.max_images = max_images
+         # Local servers usually ignore the key, but the SDK requires one.
+         self.client = client or AsyncOpenAI(base_url=base_url, api_key=api_key or "EMPTY")
+ 
+@@ -99,7 +107,7 @@ class OpenAICompatBackend:
+         """
+         request: OpenAIRequest = {
+             "model": self.model,
+-            "messages": [message_to_openai(message) for message in messages],
++            "messages": messages_to_openai(messages, max_images=self.max_images),
+             "temperature": self.temperature,
+         }
+         # Some servers reject an empty tools list, so only send it when there are tools.
+@@ -170,8 +178,9 @@ def message_to_openai(message: Message) -> OpenAIMessage:
+         message: A message from the history.
+ 
+     Returns:
+-        The request dict for that message. Reasoning is left out on purpose: models
+-        are trained to see their past answers, not their past thinking.
++        The request dict for that message, text only: `messages_to_openai` adds the
++        images. Reasoning is left out on purpose: models are trained to see their
++        past answers, not their past thinking.
+     """
+     if message.role == "tool":
+         return {
+@@ -198,6 +207,66 @@ def message_to_openai(message: Message) -> OpenAIMessage:
+     return out
+ 
+ 
++def image_part(image: Image) -> OpenAIMessage:
++    """Args: image: An image. Returns: it as one part of a message's content."""
++    return {"type": "image_url", "image_url": {"url": image.to_data_url()}}
++
++
++def messages_to_openai(
++    messages: list[Message], *, max_images: int | None = None
++) -> list[OpenAIMessage]:
++    """Convert the history to OpenAI's format, images included.
++
++    A user message with images gets its content as parts: the text, then the images.
++    Tool messages can only hold text, so a tool's images go into a user message right
++    after the run of tool messages they belong to (tool messages must directly follow
++    the assistant turn that called them). Each tool message with images says so.
++
++    Args:
++        messages: The history.
++        max_images: Keep only the newest this many images. The older ones are
++            replaced by DROPPED_IMAGE, so the model knows something was there.
++
++    Returns:
++        The request's "messages".
++    """
++    total = sum(len(message.images) for message in messages)
++    drop = total - max_images if max_images is not None and total > max_images else 0
++    counted = 0
++
++    def part(image: Image) -> OpenAIMessage:
++        nonlocal counted
++        counted += 1
++        return {"type": "text", "text": DROPPED_IMAGE} if counted <= drop else image_part(image)
++
++    out: list[OpenAIMessage] = []
++    shown: list[OpenAIMessage] = []  # tool images, waiting for the run of tools to end
++    for message in messages:
++        if message.role != "tool" and shown:
++            out.append({"role": "user", "content": shown})
++            shown = []
++        converted = message_to_openai(message)
++        if message.images and message.role == "tool":
++            many = len(message.images) > 1
++            note = "The images are" if many else "The image is"
++            converted["content"] += f"\n({note} in the next message.)"
++            label = "Images" if many else "Image"
++            shown.append(
++                {
++                    "type": "text",
++                    "text": f"{label} from {message.name} (call {message.tool_call_id}):",
++                }
++            )
++            shown += [part(image) for image in message.images]
++        elif message.images:
++            text = {"type": "text", "text": message.content or ""}
++            converted["content"] = [text, *(part(image) for image in message.images)]
++        out.append(converted)
++    if shown:
++        out.append({"role": "user", "content": shown})
++    return out
++
++
+ def tool_call_from_openai(call: Any) -> ToolCall:
+     """Convert one tool call from the response, keeping broken arguments visible.
+ 
+diff --git a/src/lil_harness/tools/coding.py b/src/lil_harness/tools/coding.py
+index 589f780..8ec3046 100644
+--- a/src/lil_harness/tools/coding.py
++++ b/src/lil_harness/tools/coding.py
+@@ -59,6 +59,28 @@ def clip(text: str, max_chars: int, hint: str = "") -> str:
+     return f"{head}\n[... {cut} characters cut{'. ' + hint if hint else ''} ...]\n{tail}"
+ 
+ 
++def resolve_in(root: Path, path: str) -> Path:
++    """Turn a path from the model into an absolute path inside a workspace.
++
++    Args:
++        root: The workspace, already resolved.
++        path: A path relative to it.
++
++    Returns:
++        The resolved absolute path (symlinks followed).
++
++    Raises:
++        ToolError: If the path ends up outside the workspace.
++    """
++    target = (root / path).resolve()
++    if not target.is_relative_to(root):
++        raise ToolError(
++            f"{path!r} is outside the workspace. Use paths relative to the workspace "
++            "folder, like 'src/main.py'."
++        )
++    return target
++
++
+ class CodingTools:
+     """The coding tools, bound to one workspace folder."""
+ 
+@@ -119,24 +141,8 @@ class CodingTools:
+     # ---- helpers -------------------------------------------------------------
+ 
+     def _resolve(self, path: str) -> Path:
+-        """Turn a path from the model into an absolute path inside the workspace.
+-
+-        Args:
+-            path: A path relative to the workspace.
+-
+-        Returns:
+-            The resolved absolute path (symlinks followed).
+-
+-        Raises:
+-            ToolError: If the path ends up outside the workspace.
+-        """
+-        target = (self.root / path).resolve()
+-        if not target.is_relative_to(self.root):
+-            raise ToolError(
+-                f"{path!r} is outside the workspace. Use paths relative to the workspace "
+-                "folder, like 'src/main.py'."
+-            )
+-        return target
++        """See `resolve_in`."""
++        return resolve_in(self.root, path)
+ 
+     def _writable(self, path: str) -> Path:
+         """Like `_resolve`, but also refuses protected files.
+diff --git a/src/lil_harness/tools/registry.py b/src/lil_harness/tools/registry.py
+index 0533e2e..71be2aa 100644
+--- a/src/lil_harness/tools/registry.py
++++ b/src/lil_harness/tools/registry.py
+@@ -22,7 +22,7 @@ from typing import Any, TypeAlias, get_type_hints
+ from pydantic import BaseModel, Field, ValidationError, create_model
+ 
+ from lil_harness.permissions import PermissionPolicy, Risk
+-from lil_harness.types import ToolCall, ToolName, ToolResult
++from lil_harness.types import Image, ToolCall, ToolName, ToolOutput, ToolResult
+ 
+ JSONSchema: TypeAlias = dict[str, Any]
+ """A JSON schema as a dict, like {"type": "object", "properties": {...}}."""
+@@ -222,7 +222,8 @@ class ToolRegistry:
+             call: The tool call as parsed by the backend.
+ 
+         Returns:
+-            The tool's output as a string (non-string outputs are JSON-encoded), or an
++            The tool's output as a string (non-string outputs are JSON-encoded, and an
++            `Image` or `ToolOutput`'s images go on the result's `images`), or an
+             error result whose content starts with "Error:".
+         """
+         spec = self._tools.get(call.name)
+@@ -260,8 +261,13 @@ class ToolRegistry:
+         except Exception as e:  # noqa: BLE001 - any tool failure is reported to the model
+             return self._error(call, f"Tool {call.name!r} failed: {type(e).__name__}: {e}")
+ 
++        images: list[Image] = []
++        if isinstance(output, Image):
++            output, images = "", [output]
++        elif isinstance(output, ToolOutput):
++            output, images = output.text, list(output.images)
+         content = output if isinstance(output, str) else json.dumps(output, default=str)
+-        return ToolResult(tool_call_id=call.id, name=call.name, content=content)
++        return ToolResult(tool_call_id=call.id, name=call.name, content=content, images=images)
+ 
+     @staticmethod
+     def _error(call: ToolCall, message: str) -> ToolResult:
+diff --git a/src/lil_harness/types.py b/src/lil_harness/types.py
+index 45319d4..b6d12c5 100644
+--- a/src/lil_harness/types.py
++++ b/src/lil_harness/types.py
+@@ -7,11 +7,18 @@ agent loop and the tools never depend on any one engine.
+ The flow: a backend returns an `AssistantTurn`. The loop stores it as a `Message`,
+ runs each `ToolCall` in it through the registry, which gives back a `ToolResult`, and
+ stores each result as a `tool` `Message`. Then the backend gets the whole history again.
++
++Images ride along on messages: a user message can carry the pictures it's about, and a
++tool can return an `Image` or a `ToolOutput` with text and images, which end up on its
++`ToolResult` and `tool` message. The backend decides how they reach the model.
+ """
+ 
+ from __future__ import annotations
+ 
++import base64
++import mimetypes
+ from dataclasses import dataclass, field
++from pathlib import Path
+ from typing import Any, Literal, TypeAlias
+ 
+ Role = Literal["system", "user", "assistant", "tool"]
+@@ -23,6 +30,59 @@ ToolArgs: TypeAlias = dict[str, Any]
+ """A tool call's arguments: argument name -> value, e.g. {"path": "a.py", "offset": 1}."""
+ 
+ 
++IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
++"""The formats vision models' servers accept."""
++
++
++@dataclass(frozen=True)
++class Image:
++    """An image for the model to see: the encoded bytes and their format.
++
++    Attributes:
++        data: The file's bytes, e.g. a PNG or JPEG.
++        mime: The format, e.g. "image/png".
++    """
++
++    data: bytes = field(repr=False)
++    mime: str
++
++    @classmethod
++    def from_path(cls, path: str | Path) -> Image:
++        """Read an image file as it is. To shrink a big one first, use
++        `lil_harness.tools.media.load_image`.
++
++        Args:
++            path: A PNG, JPEG, GIF or WebP file.
++
++        Returns:
++            The image, its format guessed from the file name.
++
++        Raises:
++            ValueError: If the file name doesn't look like one of those formats.
++        """
++        mime, _ = mimetypes.guess_type(str(path))
++        if mime not in IMAGE_TYPES:
++            raise ValueError(f"{path} isn't a PNG, JPEG, GIF or WebP image")
++        return cls(Path(path).read_bytes(), mime)
++
++    def to_data_url(self) -> str:
++        """Returns: the image as a data: URL, the way the OpenAI API takes images."""
++        return f"data:{self.mime};base64,{base64.b64encode(self.data).decode()}"
++
++
++@dataclass
++class ToolOutput:
++    """What a tool returns when it has images to show, besides text.
++
++    Attributes:
++        text: What the model reads, e.g. "cat.jpg: 4000x3000 pixels, shown at 1024x768."
++        images: What it sees.
++    """
++
++    text: str
++    images: list[Image] = field(default_factory=list)
++
++
+ @dataclass
+ class ToolCall:
+     """A request from the model to run one tool.
+@@ -55,12 +115,14 @@ class ToolResult:
+         content: The output, or an error message starting with "Error:".
+         is_error: True if the call failed in any way (bad arguments, permission
+             denied, the tool raised).
++        images: Images the tool returned, for the model to see.
+     """
+ 
+     tool_call_id: str
+     name: ToolName
+     content: str
+     is_error: bool = False
++    images: list[Image] = field(default_factory=list)
+ 
+ 
+ @dataclass
+@@ -75,6 +137,7 @@ class Message:
+         name: Set on tool messages: the tool's name.
+         reasoning: The model's thinking before this assistant message, if the server
+             returned it. Kept for inspection only: backends don't send it back.
++        images: Images on user and tool messages, for the model to see.
+     """
+ 
+     role: Role
+@@ -83,6 +146,7 @@ class Message:
+     tool_call_id: str | None = None
+     name: str | None = None
+     reasoning: str | None = None
++    images: list[Image] = field(default_factory=list)
+ 
+     @classmethod
+     def system(cls, content: str) -> Message:
+@@ -97,16 +161,17 @@ class Message:
+         return cls(role="system", content=content)
+ 
+     @classmethod
+-    def user(cls, content: str) -> Message:
++    def user(cls, content: str, images: list[Image] | None = None) -> Message:
+         """Make a user message.
+ 
+         Args:
+             content: What the user says.
++            images: Pictures to go with it, e.g. from `load_image`.
+ 
+         Returns:
+             A message with role "user".
+         """
+-        return cls(role="user", content=content)
++        return cls(role="user", content=content, images=list(images or []))
+ 
+     @classmethod
+     def tool(cls, result: ToolResult) -> Message:
+@@ -123,6 +188,7 @@ class Message:
+             content=result.content,
+             tool_call_id=result.tool_call_id,
+             name=result.name,
++            images=list(result.images),
+         )
+ 
+ 

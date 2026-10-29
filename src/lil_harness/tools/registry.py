@@ -22,7 +22,7 @@ from typing import Any, TypeAlias, get_type_hints
 from pydantic import BaseModel, Field, ValidationError, create_model
 
 from lil_harness.permissions import PermissionPolicy, Risk
-from lil_harness.types import ToolCall, ToolName, ToolResult
+from lil_harness.types import Image, ToolCall, ToolName, ToolOutput, ToolResult
 
 JSONSchema: TypeAlias = dict[str, Any]
 """A JSON schema as a dict, like {"type": "object", "properties": {...}}."""
@@ -222,7 +222,8 @@ class ToolRegistry:
             call: The tool call as parsed by the backend.
 
         Returns:
-            The tool's output as a string (non-string outputs are JSON-encoded), or an
+            The tool's output as a string (non-string outputs are JSON-encoded, and an
+            `Image` or `ToolOutput`'s images go on the result's `images`), or an
             error result whose content starts with "Error:".
         """
         spec = self._tools.get(call.name)
@@ -260,8 +261,13 @@ class ToolRegistry:
         except Exception as e:  # noqa: BLE001 - any tool failure is reported to the model
             return self._error(call, f"Tool {call.name!r} failed: {type(e).__name__}: {e}")
 
+        images: list[Image] = []
+        if isinstance(output, Image):
+            output, images = "", [output]
+        elif isinstance(output, ToolOutput):
+            output, images = output.text, list(output.images)
         content = output if isinstance(output, str) else json.dumps(output, default=str)
-        return ToolResult(tool_call_id=call.id, name=call.name, content=content)
+        return ToolResult(tool_call_id=call.id, name=call.name, content=content, images=images)
 
     @staticmethod
     def _error(call: ToolCall, message: str) -> ToolResult:

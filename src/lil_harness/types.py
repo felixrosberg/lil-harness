@@ -7,11 +7,18 @@ agent loop and the tools never depend on any one engine.
 The flow: a backend returns an `AssistantTurn`. The loop stores it as a `Message`,
 runs each `ToolCall` in it through the registry, which gives back a `ToolResult`, and
 stores each result as a `tool` `Message`. Then the backend gets the whole history again.
+
+Images ride along on messages: a user message can carry the pictures it's about, and a
+tool can return an `Image` or a `ToolOutput` with text and images, which end up on its
+`ToolResult` and `tool` message. The backend decides how they reach the model.
 """
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 Role = Literal["system", "user", "assistant", "tool"]
@@ -21,6 +28,59 @@ ToolName: TypeAlias = str
 """A tool's name, as the model calls it, e.g. "read_file"."""
 ToolArgs: TypeAlias = dict[str, Any]
 """A tool call's arguments: argument name -> value, e.g. {"path": "a.py", "offset": 1}."""
+
+
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+"""The formats vision models' servers accept."""
+
+
+@dataclass(frozen=True)
+class Image:
+    """An image for the model to see: the encoded bytes and their format.
+
+    Attributes:
+        data: The file's bytes, e.g. a PNG or JPEG.
+        mime: The format, e.g. "image/png".
+    """
+
+    data: bytes = field(repr=False)
+    mime: str
+
+    @classmethod
+    def from_path(cls, path: str | Path) -> Image:
+        """Read an image file as it is. To shrink a big one first, use
+        `lil_harness.tools.media.load_image`.
+
+        Args:
+            path: A PNG, JPEG, GIF or WebP file.
+
+        Returns:
+            The image, its format guessed from the file name.
+
+        Raises:
+            ValueError: If the file name doesn't look like one of those formats.
+        """
+        mime, _ = mimetypes.guess_type(str(path))
+        if mime not in IMAGE_TYPES:
+            raise ValueError(f"{path} isn't a PNG, JPEG, GIF or WebP image")
+        return cls(Path(path).read_bytes(), mime)
+
+    def to_data_url(self) -> str:
+        """Returns: the image as a data: URL, the way the OpenAI API takes images."""
+        return f"data:{self.mime};base64,{base64.b64encode(self.data).decode()}"
+
+
+@dataclass
+class ToolOutput:
+    """What a tool returns when it has images to show, besides text.
+
+    Attributes:
+        text: What the model reads, e.g. "cat.jpg: 4000x3000 pixels, shown at 1024x768."
+        images: What it sees.
+    """
+
+    text: str
+    images: list[Image] = field(default_factory=list)
 
 
 @dataclass
@@ -55,12 +115,14 @@ class ToolResult:
         content: The output, or an error message starting with "Error:".
         is_error: True if the call failed in any way (bad arguments, permission
             denied, the tool raised).
+        images: Images the tool returned, for the model to see.
     """
 
     tool_call_id: str
     name: ToolName
     content: str
     is_error: bool = False
+    images: list[Image] = field(default_factory=list)
 
 
 @dataclass
@@ -75,6 +137,7 @@ class Message:
         name: Set on tool messages: the tool's name.
         reasoning: The model's thinking before this assistant message, if the server
             returned it. Kept for inspection only: backends don't send it back.
+        images: Images on user and tool messages, for the model to see.
     """
 
     role: Role
@@ -83,6 +146,7 @@ class Message:
     tool_call_id: str | None = None
     name: str | None = None
     reasoning: str | None = None
+    images: list[Image] = field(default_factory=list)
 
     @classmethod
     def system(cls, content: str) -> Message:
@@ -97,16 +161,17 @@ class Message:
         return cls(role="system", content=content)
 
     @classmethod
-    def user(cls, content: str) -> Message:
+    def user(cls, content: str, images: list[Image] | None = None) -> Message:
         """Make a user message.
 
         Args:
             content: What the user says.
+            images: Pictures to go with it, e.g. from `load_image`.
 
         Returns:
             A message with role "user".
         """
-        return cls(role="user", content=content)
+        return cls(role="user", content=content, images=list(images or []))
 
     @classmethod
     def tool(cls, result: ToolResult) -> Message:
@@ -123,6 +188,7 @@ class Message:
             content=result.content,
             tool_call_id=result.tool_call_id,
             name=result.name,
+            images=list(result.images),
         )
 
 
